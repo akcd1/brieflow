@@ -26,28 +26,30 @@ rule align_phenotype:
 
 
 # Segments cells and nuclei using pre-defined methods
-rule segment_phenotype:
-    input:
-        PHENOTYPE_OUTPUTS["align_phenotype"],
-    output:
-        PHENOTYPE_OUTPUTS_MAPPED["segment_phenotype"],
-    params:
-        config=lambda wildcards: get_segmentation_params("phenotype", config),
-    script:
-        "../scripts/shared/segment.py"
+# ONLY RUN IF CELL SEGMENTATION IS ENABLED
+if config["phenotype"]["segment_cells"]:
+    rule segment_phenotype:
+        input:
+            PHENOTYPE_OUTPUTS["align_phenotype"],
+        output:
+            PHENOTYPE_OUTPUTS_MAPPED["segment_phenotype"],
+        params:
+            config=lambda wildcards: get_segmentation_params("phenotype", config),
+        script:
+            "../scripts/shared/segment.py"
 
 
 # Extract cytoplasmic masks from segmented nuclei, cells
-rule identify_cytoplasm:
-    input:
-        # nuclei segmentation map
-        PHENOTYPE_OUTPUTS["segment_phenotype"][0],
-        # cells segmentation map
-        PHENOTYPE_OUTPUTS["segment_phenotype"][1],
-    output:
-        PHENOTYPE_OUTPUTS_MAPPED["identify_cytoplasm"],
-    script:
-        "../scripts/phenotype/identify_cytoplasm_cellpose.py"
+    rule identify_cytoplasm:
+        input:
+            # nuclei segmentation map
+            PHENOTYPE_OUTPUTS["segment_phenotype"][0],
+            # cells segmentation map
+            PHENOTYPE_OUTPUTS["segment_phenotype"][1],
+        output:
+            PHENOTYPE_OUTPUTS_MAPPED["identify_cytoplasm"],
+        script:
+            "../scripts/phenotype/identify_cytoplasm_cellpose.py"
 
 
 # Extract minimal phenotype information from segmented nuclei images
@@ -77,22 +79,23 @@ rule combine_phenotype_info:
 
 
 # Identify vacuoles from aligned phenotype image and cell segmentation
+# MODIFIED: Inputs are now conditional based on segment_cells parameter
 rule identify_vacuoles:
     input:
-        # aligned phenotype image
+        # aligned phenotype image (always required)
         PHENOTYPE_OUTPUTS["align_phenotype"],
-        # cell segmentation map
-        PHENOTYPE_OUTPUTS["segment_phenotype"][1],
-        # cytoplasm mask
-        PHENOTYPE_OUTPUTS["identify_cytoplasm"],
-        # phenotype info with nuclei centroids
+        # cell segmentation map (conditionally required)
+        (PHENOTYPE_OUTPUTS["segment_phenotype"][1] if config["phenotype"]["segment_cells"] else []),
+        # cytoplasm mask (conditionally required)
+        (PHENOTYPE_OUTPUTS["identify_cytoplasm"] if config["phenotype"]["segment_cells"] else []),
+        # phenotype info with nuclei centroids (always required)
         PHENOTYPE_OUTPUTS["extract_phenotype_info"],
     output:
         # vacuole mask
         PHENOTYPE_OUTPUTS_MAPPED["identify_vacuoles"][0],
         # cell vacuole table
         PHENOTYPE_OUTPUTS_MAPPED["identify_vacuoles"][1],
-        # updated cytoplasm masks
+        # updated cytoplasm masks (may be empty if no cell segmentation)
         PHENOTYPE_OUTPUTS_MAPPED["identify_vacuoles"][2],
     params:
         vacuole_channel_index=config["phenotype"]["vacuole_channel_index"],
@@ -100,29 +103,32 @@ rule identify_vacuoles:
         vacuole_max_size=config["phenotype"]["vacuole_max_size"],
         nuclei_detection=config["phenotype"]["nuclei_detection"],
         min_distance_between_maxima=config["phenotype"]["min_distance_between_maxima"],
+        segment_cells=config["phenotype"]["segment_cells"],  # NEW PARAMETER
     script:
         "../scripts/phenotype/identify_vacuoles.py"
 
 
 # Extract full phenotype information using CellProfiler from phenotype images
-rule extract_phenotype_cp:
-    input:
-        # aligned phenotype image
-        PHENOTYPE_OUTPUTS["align_phenotype"],
-        # nuclei segmentation map
-        PHENOTYPE_OUTPUTS["segment_phenotype"][0],
-        # cells segmentation map
-        PHENOTYPE_OUTPUTS["segment_phenotype"][1],
-        # updated cytoplasm mask
-        PHENOTYPE_OUTPUTS["identify_vacuoles"][2],
-    output:
-        PHENOTYPE_OUTPUTS_MAPPED["extract_phenotype_cp"],
-    params:
-        foci_channel=config["phenotype"]["foci_channel"],
-        channel_names=config["phenotype"]["channel_names"],
-        cp_method=config["phenotype"]["cp_method"],
-    script:
-        "../scripts/phenotype/extract_phenotype_cp_multichannel.py"
+# ONLY RUN IF CELL SEGMENTATION IS ENABLED
+if config["phenotype"]["segment_cells"]:
+    rule extract_phenotype_cp:
+        input:
+            # aligned phenotype image
+            PHENOTYPE_OUTPUTS["align_phenotype"],
+            # nuclei segmentation map
+            PHENOTYPE_OUTPUTS["segment_phenotype"][0],
+            # cells segmentation map
+            PHENOTYPE_OUTPUTS["segment_phenotype"][1],
+            # updated cytoplasm mask
+            PHENOTYPE_OUTPUTS["identify_vacuoles"][2],
+        output:
+            PHENOTYPE_OUTPUTS_MAPPED["extract_phenotype_cp"],
+        params:
+            foci_channel=config["phenotype"]["foci_channel"],
+            channel_names=config["phenotype"]["channel_names"],
+            cp_method=config["phenotype"]["cp_method"],
+        script:
+            "../scripts/phenotype/extract_phenotype_cp_multichannel.py"
 
 
 # Extract vacuole phenotype features
@@ -161,73 +167,75 @@ rule merge_phenotype_vacuoles:
 
 
 # Merge vacuole data with main phenotype data
-rule merge_vacuoles_phenotype_cp:
-    input:
-        # main phenotype data (tile-level)
-        PHENOTYPE_OUTPUTS["extract_phenotype_cp"],
-        # vacuole data (tile-level) 
-        PHENOTYPE_OUTPUTS["identify_vacuoles"][1], 
-    output:
-        PHENOTYPE_OUTPUTS_MAPPED["merge_vacuoles_phenotype_cp"],
-    script:
-        "../scripts/phenotype/merge_vacuoles_phenotype_cp.py"
+# ONLY RUN IF CELL SEGMENTATION IS ENABLED
+if config["phenotype"]["segment_cells"]:
+    rule merge_vacuoles_phenotype_cp:
+        input:
+            # main phenotype data (tile-level)
+            PHENOTYPE_OUTPUTS["extract_phenotype_cp"],
+            # vacuole data (tile-level) 
+            PHENOTYPE_OUTPUTS["identify_vacuoles"][1], 
+        output:
+            PHENOTYPE_OUTPUTS_MAPPED["merge_vacuoles_phenotype_cp"],
+        script:
+            "../scripts/phenotype/merge_vacuoles_phenotype_cp.py"
 
 
-# Combine phenotype results from different tiles
-rule merge_phenotype_cp:
-    input:
-        lambda wildcards: output_to_input(
-            PHENOTYPE_OUTPUTS["merge_vacuoles_phenotype_cp"],
-            wildcards=wildcards,
-            expansion_values=["tile"],
-            metadata_combos=phenotype_wildcard_combos,
-        ),
-    params:
-        channel_names=config["phenotype"]["channel_names"],
-    output:
-        PHENOTYPE_OUTPUTS_MAPPED["merge_phenotype_cp"],
-    script:
-        "../scripts/phenotype/merge_phenotype_cp.py"
+    # Combine phenotype results from different tiles
+    rule merge_phenotype_cp:
+        input:
+            lambda wildcards: output_to_input(
+                PHENOTYPE_OUTPUTS["merge_vacuoles_phenotype_cp"],
+                wildcards=wildcards,
+                expansion_values=["tile"],
+                metadata_combos=phenotype_wildcard_combos,
+            ),
+        params:
+            channel_names=config["phenotype"]["channel_names"],
+        output:
+            PHENOTYPE_OUTPUTS_MAPPED["merge_phenotype_cp"],
+        script:
+            "../scripts/phenotype/merge_phenotype_cp.py"
 
 
-# Evaluate segmentation results
-rule eval_segmentation_phenotype:
-    input:
-        # path to segmentation stats for well/tile
-        segmentation_stats_paths=lambda wildcards: output_to_input(
-            PHENOTYPE_OUTPUTS["segment_phenotype"][2],
-            wildcards=wildcards,
-            expansion_values=["well", "tile"],
-            metadata_combos=phenotype_wildcard_combos,
-        ),
-        # paths to combined cell data
-        cells_paths=lambda wildcards: output_to_input(
-            PHENOTYPE_OUTPUTS["combine_phenotype_info"][0],
-            wildcards=wildcards,
-            expansion_values=["well"],
-            metadata_combos=phenotype_wildcard_combos,
-        ),
-    output:
-        PHENOTYPE_OUTPUTS_MAPPED["eval_segmentation_phenotype"],
-    params:
-        heatmap_shape="6W_ph",
-    script:
-        "../scripts/shared/eval_segmentation.py"
+    # Evaluate segmentation results
+    rule eval_segmentation_phenotype:
+        input:
+            # path to segmentation stats for well/tile
+            segmentation_stats_paths=lambda wildcards: output_to_input(
+                PHENOTYPE_OUTPUTS["segment_phenotype"][2],
+                wildcards=wildcards,
+                expansion_values=["well", "tile"],
+                metadata_combos=phenotype_wildcard_combos,
+            ),
+            # paths to combined cell data
+            cells_paths=lambda wildcards: output_to_input(
+                PHENOTYPE_OUTPUTS["combine_phenotype_info"][0],
+                wildcards=wildcards,
+                expansion_values=["well"],
+                metadata_combos=phenotype_wildcard_combos,
+            ),
+        output:
+            PHENOTYPE_OUTPUTS_MAPPED["eval_segmentation_phenotype"],
+        params:
+            heatmap_shape="6W_ph",
+        script:
+            "../scripts/shared/eval_segmentation.py"
 
 
-rule eval_features:
-    input:
-        # use minimum phenotype CellProfiler features for evaluation
-        cells_paths=lambda wildcards: output_to_input(
-            PHENOTYPE_OUTPUTS["merge_phenotype_cp"][1],
-            wildcards=wildcards,
-            expansion_values=["well"],
-            metadata_combos=phenotype_wildcard_combos,
-        ),
-    output:
-        PHENOTYPE_OUTPUTS_MAPPED["eval_features"],
-    script:
-        "../scripts/phenotype/eval_features.py"
+    rule eval_features:
+        input:
+            # use minimum phenotype CellProfiler features for evaluation
+            cells_paths=lambda wildcards: output_to_input(
+                PHENOTYPE_OUTPUTS["merge_phenotype_cp"][1],
+                wildcards=wildcards,
+                expansion_values=["well"],
+                metadata_combos=phenotype_wildcard_combos,
+            ),
+        output:
+            PHENOTYPE_OUTPUTS_MAPPED["eval_features"],
+        script:
+            "../scripts/phenotype/eval_features.py"
 
 
 # TODO: test and implement segmentation paramsearch for updated brieflow setup
