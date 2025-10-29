@@ -157,30 +157,36 @@ def segment_cellpose(
             return nuclei
 
 
-def prepare_cellpose(data, dapi_index, cyto_index, logscale=True, log_kwargs=dict()):
+def prepare_cellpose(data, dapi_index, cyto_index=None, logscale=True, log_kwargs=dict()):
     """Prepare a three-channel RGB image for use with the Cellpose GUI.
 
     Args:
         data (list or numpy.ndarray): List or array containing DAPI and cytoplasmic channel images.
         dapi_index (int): Index of the DAPI channel in the data.
-        cyto_index (int): Index of the cytoplasmic channel in the data.
+        cyto_index (int, optional): Index of the cytoplasmic channel in the data. If None, uses blank channel.
         logscale (bool, optional): Whether to apply log scaling to the cytoplasmic channel. Default is True.
         log_kwargs (dict, optional): Additional keyword arguments for log scaling.
 
     Returns:
         numpy.ndarray: Three-channel RGB image prepared for use with Cellpose GUI.
     """
-    # Extract DAPI and cytoplasmic channel images from the data
+    # Extract DAPI channel
     dapi = data[dapi_index]
-    cyto = data[cyto_index]
+    
+    # Extract or create cytoplasmic channel
+    if cyto_index is not None:
+        cyto = data[cyto_index]
+        
+        # Apply log scaling to the cytoplasmic channel if specified
+        if logscale:
+            cyto = image_log_scale(cyto, **log_kwargs)
+            cyto /= cyto.max()  # Normalize the image for uint8 conversion
+    else:
+        # Use blank channel if no cyto_index provided
+        cyto = np.zeros_like(dapi)
 
     # Create a blank array with the same shape as the DAPI channel
     blank = np.zeros_like(dapi)
-
-    # Apply log scaling to the cytoplasmic channel if specified
-    if logscale:
-        cyto = image_log_scale(cyto, **log_kwargs)
-        cyto /= cyto.max()  # Normalize the image for uint8 conversion
 
     # Normalize the intensity of the DAPI channel and scale it to the range [0, 1]
     dapi_upper = np.percentile(dapi, 99.5)
@@ -190,15 +196,14 @@ def prepare_cellpose(data, dapi_index, cyto_index, logscale=True, log_kwargs=dic
     # Convert the channels to uint8 format for RGB image creation
     red, green, blue = img_as_ubyte(blank), img_as_ubyte(cyto), img_as_ubyte(dapi)
 
-    # Stack the channels to create the RGB image and transpose the dimensions
-    # return np.array([red, green, blue]).transpose([1, 2, 0])
+    # Stack the channels to create the RGB image
     return np.array([red, green, blue])
 
 
 def estimate_diameters(
     data,
     dapi_index,
-    cyto_index,
+    cyto_index=None,
     channels=[2, 3],  # Default channels for cell estimation
     cyto_model="cyto3",
     cellpose_kwargs=dict(flow_threshold=0.4, cellprob_threshold=0),
@@ -210,7 +215,7 @@ def estimate_diameters(
     Args:
         data (numpy.ndarray): Multichannel image data
         dapi_index (int): Index of DAPI channel
-        cyto_index (int): Index of cytoplasmic channel
+        cyto_index (int, optional): Index of cytoplasmic channel. If None, only estimates nuclei diameter.
         channels (list): Channel indices for diameter estimation [cytoplasm, nuclei]
         cyto_model (str): Cellpose model type to use
         cellpose_kwargs (dict): Additional keyword arguments for Cellpose
@@ -218,12 +223,10 @@ def estimate_diameters(
         logscale (bool): Whether to apply log scaling to image
 
     Returns:
-        tuple: Estimated diameters for (nuclei, cells)
+        tuple: Estimated diameters for (nuclei, cells). If cyto_index is None, returns (nuclei, None).
     """
     # Prepare RGB image
-    log_kwargs = cellpose_kwargs.pop(
-        "log_kwargs", dict()
-    )  # Extract log_kwargs from cellpose_kwargs
+    log_kwargs = cellpose_kwargs.pop("log_kwargs", dict())
     rgb = prepare_cellpose(
         data, dapi_index, cyto_index, logscale, log_kwargs=log_kwargs
     )
@@ -236,13 +239,17 @@ def estimate_diameters(
     diam_nuclear = float(diam_nuclear)
     print(f"Estimated nuclear diameter: {diam_nuclear:.1f} pixels")
 
-    # Find optimal cell diameter
-    print("Estimating cell diameters...")
-    model_cyto = Cellpose(model_type=cyto_model, gpu=gpu)
-    diam_cell, _ = model_cyto.sz.eval(rgb, channels=channels)
-    diam_cell = np.maximum(5.0, diam_cell)
-    diam_cell = float(diam_cell)
-    print(f"Estimated cell diameter: {diam_cell:.1f} pixels")
+    # Only estimate cell diameter if cyto_index is provided
+    if cyto_index is not None:
+        print("Estimating cell diameters...")
+        model_cyto = Cellpose(model_type=cyto_model, gpu=gpu)
+        diam_cell, _ = model_cyto.sz.eval(rgb, channels=channels)
+        diam_cell = np.maximum(5.0, diam_cell)
+        diam_cell = float(diam_cell)
+        print(f"Estimated cell diameter: {diam_cell:.1f} pixels")
+    else:
+        print("No cytoplasmic channel provided, skipping cell diameter estimation")
+        diam_cell = None
 
     return diam_nuclear, diam_cell
 
