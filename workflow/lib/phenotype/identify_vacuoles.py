@@ -5,7 +5,7 @@ Key improvements for handling clumping:
 2. Enhanced watershed with multiple marker strategies
 3. Morphological operations for better separation
 4. H-minima transform to suppress spurious local maxima
-5. Alternative declumping with distance + intensity features
+5. Shape-based declumping with boundary proportion filtering
 """
 
 import numpy as np
@@ -13,8 +13,6 @@ import pandas as pd
 from scipy import ndimage
 from skimage import filters, morphology, measure, segmentation, feature, exposure
 import cv2
-
-
 
 
 def get_feret_diameters(coords):
@@ -27,7 +25,7 @@ def get_feret_diameters(coords):
 
 def enhanced_declumping(binary_mask, vacuole_img, min_distance=20, h_minima=None):
     """
-    Enhanced declumping using multiple strategies.
+    Enhanced declumping using distance transform and intensity-based markers.
     
     Parameters
     ----------
@@ -39,61 +37,49 @@ def enhanced_declumping(binary_mask, vacuole_img, min_distance=20, h_minima=None
         Minimum distance between peaks
     h_minima : float, optional
         Height threshold for h-minima transform (suppresses small local maxima)
-        If None, automatically calculated as a fraction of distance transform range
+        If None, automatically calculated as 20th percentile of distance values
     
     Returns
     -------
     declumped : ndarray
         Labeled segmentation mask
     """
-    # Strategy 1: Distance transform with adaptive h-minima
+    # Distance transform with adaptive h-minima
     distance = ndimage.distance_transform_edt(binary_mask)
     
-    # Auto-calculate h_minima if not provided (suppress shallow local maxima)
+    # Auto-calculate h_minima if not provided (suppress bottom 20% of peaks)
     if h_minima is None:
-        h_minima = np.percentile(distance[distance > 0], 20)  # Suppress bottom 20% of peaks
+        h_minima = np.percentile(distance[distance > 0], 20)
     
     # Apply h-minima transform to suppress spurious local maxima
-    # This reduces over-segmentation by merging shallow peaks
     distance_filtered = morphology.h_minima(distance, h_minima)
     
-    # Find local maxima with increased minimum distance
+    # Find distance-based peaks
     local_max = feature.peak_local_max(
         distance_filtered,
         min_distance=min_distance,
         labels=binary_mask,
-        exclude_border=True  # Exclude border to avoid edge artifacts
+        exclude_border=True
     )
     
-    # Strategy 2: If we have intensity image, use intensity peaks as additional markers
-    # This helps separate vacuoles that are close but have distinct intensity peaks
+    # Find intensity-based peaks and merge with distance peaks
     if vacuole_img is not None:
-        # Smooth intensity image to find robust peaks
         smoothed_intensity = filters.gaussian(vacuole_img, sigma=2)
-        
-        # Find intensity peaks within the mask
         intensity_peaks = feature.peak_local_max(
             smoothed_intensity,
-            min_distance=min_distance // 2,  # Allow closer spacing for intensity peaks
+            min_distance=min_distance // 2,
             labels=binary_mask,
             exclude_border=True,
-            threshold_rel=0.3  # Only consider peaks above 30% of max
+            threshold_rel=0.3
         )
         
-        # Combine distance and intensity markers
-        # Use a set to avoid duplicates (peaks that are close to each other)
-        all_peaks = []
-        for peak in local_max:
-            all_peaks.append(tuple(peak))
-        
+        # Merge peaks, avoiding duplicates
+        all_peaks = [tuple(peak) for peak in local_max]
         for peak in intensity_peaks:
-            # Only add intensity peak if it's not too close to existing distance peak
-            is_far_enough = True
-            for existing_peak in all_peaks:
-                dist = np.sqrt((peak[0] - existing_peak[0])**2 + (peak[1] - existing_peak[1])**2)
-                if dist < min_distance / 2:
-                    is_far_enough = False
-                    break
+            is_far_enough = all(
+                np.sqrt((peak[0] - ep[0])**2 + (peak[1] - ep[1])**2) >= min_distance / 2
+                for ep in all_peaks
+            )
             if is_far_enough:
                 all_peaks.append(tuple(peak))
         
@@ -101,12 +87,10 @@ def enhanced_declumping(binary_mask, vacuole_img, min_distance=20, h_minima=None
     else:
         markers_array = local_max
     
-    # Create markers for watershed
+    # Create markers and apply watershed
     markers = np.zeros_like(binary_mask, dtype=int)
     if len(markers_array) > 0:
         markers[tuple(markers_array.T)] = np.arange(1, len(markers_array) + 1)
-        
-        # Apply watershed on negative distance (valleys become peaks)
         declumped = segmentation.watershed(-distance, markers, mask=binary_mask)
         
         # Recover unassigned regions
@@ -131,38 +115,25 @@ def apply_morphological_opening(binary_mask, opening_disk_radius=1):
     binary_mask : ndarray
         Binary mask of vacuoles
     opening_disk_radius : int
-        Radius of disk structuring element in pixels.
-        - radius=1: Cuts bridges 1-2 pixels wide (default, very thin)
-        - radius=2: Cuts bridges 2-4 pixels wide (thin)
-        - radius=3: Cuts bridges 3-6 pixels wide (medium)
-        - radius=4: Cuts bridges 4-8 pixels wide (thick)
-        Larger radius = more aggressive bridge cutting
+        Radius of disk structuring element (larger = more aggressive)
     
     Returns
     -------
     opened_mask : ndarray
         Morphologically opened mask
     """
-    # Use a disk-shaped structuring element
-    # This helps separate vacuoles connected by thin bridges
     footprint = morphology.disk(max(1, opening_disk_radius))
     opened = morphology.binary_opening(binary_mask, footprint=footprint)
     
-    # Erosion followed by dilation (opening) may disconnect some vacuoles
-    # but it can also remove small vacuoles entirely
-    # So we combine the opened result with the original to recover small objects
-    
-    # Get small objects that were removed by opening
+    # Recover small objects that were removed by opening
     removed = binary_mask & ~opened
     small_objects, num = ndimage.label(removed)
     
-    # Add back small objects that meet size criteria
     # Only recover objects at least as large as the structuring element
     min_recoverable_size = np.pi * opening_disk_radius ** 2
     for i in range(1, num + 1):
         obj_mask = small_objects == i
-        obj_size = np.sum(obj_mask)
-        if obj_size >= min_recoverable_size:
+        if np.sum(obj_mask) >= min_recoverable_size:
             opened |= obj_mask
     
     return opened
@@ -170,9 +141,7 @@ def apply_morphological_opening(binary_mask, opening_disk_radius=1):
 
 def multi_threshold_segmentation(vacuole_img, sigma=1.3488):
     """
-    Apply multiple thresholding methods and combine results.
-    
-    This helps capture vacuoles with varying intensities.
+    Apply multiple thresholding methods and combine results using majority voting.
     
     Parameters
     ----------
@@ -186,30 +155,28 @@ def multi_threshold_segmentation(vacuole_img, sigma=1.3488):
     combined_mask : ndarray
         Combined binary mask from multiple thresholds
     """
-    # Clip and transform
+    # Preprocess image
     vacuole_img = np.clip(vacuole_img, a_min=0, a_max=None)
-    vacuole_log = exposure.adjust_log(vacuole_img + 1)  # +1 to avoid log(0)
+    vacuole_log = exposure.adjust_log(vacuole_img + 1)
     vacuole_smooth = filters.gaussian(vacuole_log, sigma=sigma)
     
-    # Method 1: Otsu (original method)
+    # Apply three thresholding methods
     thresh_otsu = filters.threshold_otsu(vacuole_smooth)
     mask_otsu = vacuole_smooth > thresh_otsu
     
-    # Method 2: Li's minimum cross entropy (good for dim objects)
     try:
         thresh_li = filters.threshold_li(vacuole_smooth)
         mask_li = vacuole_smooth > thresh_li
     except:
         mask_li = mask_otsu
     
-    # Method 3: Yen's method (good for high dynamic range)
     try:
         thresh_yen = filters.threshold_yen(vacuole_smooth)
         mask_yen = vacuole_smooth > thresh_yen
     except:
         mask_yen = mask_otsu
     
-    # Combine masks using voting (at least 2 out of 3 methods agree)
+    # Majority voting (at least 2 out of 3 methods agree)
     vote_sum = mask_otsu.astype(int) + mask_li.astype(int) + mask_yen.astype(int)
     combined_mask = vote_sum >= 2
     
@@ -217,6 +184,95 @@ def multi_threshold_segmentation(vacuole_img, sigma=1.3488):
     combined_mask = ndimage.binary_fill_holes(combined_mask)
     
     return combined_mask
+
+
+def shape_based_declumping(binary_mask, vacuole_img=None, min_distance=20, proportion_threshold=0.12):
+    """
+    Split connected components only when the separating boundary is short
+    relative to the region perimeter.
+
+    Parameters
+    ----------
+    binary_mask : ndarray
+        Input binary vacuole mask
+    vacuole_img : ndarray, optional
+        Intensity image (currently unused, kept for API compatibility)
+    min_distance : int
+        Minimum distance between peaks for watershed markers
+    proportion_threshold : float
+        If boundary_length / perimeter < proportion_threshold, accept the split
+        Example: 0.12 means cut must be < 12% of perimeter to split
+
+    Returns
+    -------
+    labeled : ndarray
+        Labeled mask after shape-based declumping
+    """
+    labeled_out = np.zeros_like(binary_mask, dtype=int)
+    next_label = 1
+
+    # Label connected regions
+    regions_lab, n = ndimage.label(binary_mask)
+    
+    for region_label in range(1, n + 1):
+        region_mask = regions_lab == region_label
+        if region_mask.sum() == 0:
+            continue
+
+        # Distance transform and find peaks
+        dist = ndimage.distance_transform_edt(region_mask)
+        peaks = feature.peak_local_max(
+            dist, 
+            min_distance=min_distance, 
+            labels=region_mask, 
+            exclude_border=False
+        )
+        
+        # If only one peak, keep as single object
+        if len(peaks) <= 1:
+            labeled_out[region_mask] = next_label
+            next_label += 1
+            continue
+
+        # Create markers and apply watershed
+        markers = np.zeros_like(region_mask, dtype=int)
+        markers[tuple(peaks.T)] = np.arange(1, len(peaks) + 1)
+        local_watershed = segmentation.watershed(-dist, markers, mask=region_mask)
+
+        # Compute boundary length between watershed regions
+        boundary_mask = np.zeros_like(region_mask, dtype=bool)
+        lab = local_watershed
+        
+        for dy, dx in ((0, 1), (1, 0), (-1, 0), (0, -1)):
+            neighbor = np.roll(lab, shift=(dy, dx), axis=(0, 1))
+            # Zero out rolled-in edges
+            if dy == 1:
+                neighbor[0, :] = 0
+            elif dy == -1:
+                neighbor[-1, :] = 0
+            if dx == 1:
+                neighbor[:, 0] = 0
+            elif dx == -1:
+                neighbor[:, -1] = 0
+            
+            boundary_mask |= (lab != neighbor) & (lab > 0) & (neighbor > 0)
+
+        boundary_length = np.sum(boundary_mask)
+        prop = measure.regionprops(region_mask.astype(np.uint8))[0]
+        perimeter = prop.perimeter if prop.perimeter > 0 else 1.0
+
+        # Accept split if boundary is short relative to perimeter
+        if (boundary_length / perimeter) < proportion_threshold:
+            sublabels = np.unique(local_watershed[local_watershed > 0])
+            for s in sublabels:
+                labeled_out[local_watershed == s] = next_label
+                next_label += 1
+        else:
+            # Reject split, keep as single object
+            labeled_out[region_mask] = next_label
+            next_label += 1
+
+    return labeled_out
 
 
 def segment_vacuoles_improved(
@@ -227,45 +283,79 @@ def segment_vacuoles_improved(
     cytoplasm_masks=None,
     vacuole_min_size=10,
     vacuole_max_size=200,
-    threshold_smoothing_scale=1.3488,
+    threshold_smoothing_scale=0,
     min_distance_between_maxima=20,
     max_objects_per_cell=120,
+    max_total_objects=300,
     overlap_threshold=0.1,
     nuclei_min_distance=5,
     nuclei_centroids=None,
     nuclei_detection=False,
-    use_multi_threshold=True,
+    use_multi_threshold=False,
     use_morphological_opening=True,
     use_enhanced_declumping=True,
-    h_minima_percentile=20,
     opening_disk_radius=1,
     use_shape_based_declumping=True,
-    proportion_threshold=0.12,       
+    proportion_threshold=0.4,
 ):
     """
     Improved vacuole segmentation with better clump handling.
     
-    New parameters
-    --------------
-    use_multi_threshold : bool, optional
-        Use multiple thresholding methods combined (default True)
-    use_morphological_opening : bool, optional
-        Apply morphological opening to separate connected vacuoles (default True)
-    use_enhanced_declumping : bool, optional
-        Use enhanced watershed with h-minima transform (default True)
-    h_minima_percentile : float, optional
-        Percentile for auto-calculating h-minima threshold (default 20)
-        Lower values = more aggressive suppression of shallow peaks
-    opening_disk_radius : int, optional
-        Radius of disk structuring element for morphological opening (default 1)
-        Controls how thick bridges need to be to get cut:
-        - radius=1: Cuts bridges 1-2 pixels wide (very thin, default)
-        - radius=2: Cuts bridges 2-4 pixels wide (thin)
-        - radius=3: Cuts bridges 3-6 pixels wide (medium)
-        - radius=4: Cuts bridges 4-8 pixels wide (thick)
-        Larger radius = more aggressive bridge cutting but may remove small vacuoles
+    Parameters
+    ----------
+    image : ndarray
+        Multi-channel image
+    vacuole_channel_index : int
+        Index of vacuole channel
+    nuclei_channel_index : int, optional
+        Index of nuclei channel for detection
+    cell_masks : ndarray, optional
+        Cell segmentation masks
+    cytoplasm_masks : ndarray, optional
+        Cytoplasm segmentation masks
+    vacuole_min_size : float
+        Minimum Feret diameter for valid vacuoles
+    vacuole_max_size : float
+        Maximum Feret diameter for valid vacuoles
+    threshold_smoothing_scale : float
+        Gaussian smoothing sigma for thresholding
+    min_distance_between_maxima : int
+        Minimum distance between watershed markers
+    max_objects_per_cell : int
+        Maximum vacuoles to assign per cell
+    max_total_objects : int, optional
+        **FAILSAFE**: If more than this many objects detected after thresholding,
+        return empty results. Use this to prevent processing images with 
+        extreme over-segmentation. If None, no limit is applied.
+    overlap_threshold : float
+        Minimum overlap ratio for vacuole-cell association
+    nuclei_min_distance : int
+        Minimum distance between nuclei peaks
+    nuclei_centroids : dict or DataFrame, optional
+        Nuclei centroid positions
+    nuclei_detection : bool
+        Whether to detect nuclei within vacuoles
+    use_multi_threshold : bool
+        Use multiple thresholding methods combined
+    use_morphological_opening : bool
+        Apply morphological opening to separate connected vacuoles
+    use_enhanced_declumping : bool
+        Use enhanced watershed with h-minima transform
+    opening_disk_radius : int
+        Radius of disk structuring element for morphological opening
+    use_shape_based_declumping : bool
+        Apply shape-based declumping refinement
+    proportion_threshold : float
+        Boundary/perimeter threshold for shape-based splitting
     
-    All other parameters are the same as the original function.
+    Returns
+    -------
+    associated_vacuoles : ndarray
+        Labeled mask of vacuoles assigned to cells
+    cell_vacuole_table : dict
+        Dictionary with 'cell_summary' and 'vacuole_cell_mapping' DataFrames
+    updated_cytoplasm_masks : ndarray, optional
+        Cytoplasm masks with vacuoles removed (if cytoplasm_masks provided)
     """
     segment_cells = cell_masks is not None
     
@@ -285,6 +375,15 @@ def segment_vacuoles_improved(
     if not np.any(binary_mask):
         print("No objects detected after thresholding")
         return create_empty_results(cell_masks, cytoplasm_masks, nuclei_detection, nuclei_centroids, segment_cells)
+
+    # --- FAILSAFE: Check for excessive objects early ---
+    if max_total_objects is not None:
+        # Quick check: count connected components before expensive processing
+        temp_labeled, num_components = ndimage.label(binary_mask)
+        if num_components > max_total_objects:
+            print(f"FAILSAFE TRIGGERED: Detected {num_components} objects (limit: {max_total_objects})")
+            print("Returning zero masks to avoid processing over-segmented image")
+            return create_empty_results(cell_masks, cytoplasm_masks, nuclei_detection, nuclei_centroids, segment_cells)
 
     # --- Morphological opening ---
     if use_morphological_opening:
@@ -310,7 +409,7 @@ def segment_vacuoles_improved(
 
     print(f"After enhanced declumping: {len(np.unique(declumped)) - 1} objects")
 
-    # --- Shape-based declumping (NEW STAGE) ---
+    # --- Shape-based declumping ---
     if use_shape_based_declumping:
         print("Applying shape-based declumping refinement...")
         declumped = shape_based_declumping(
@@ -328,7 +427,7 @@ def segment_vacuoles_improved(
         filled = ndimage.binary_fill_holes(mask)
         declumped[filled] = label
     
-    # Filter by diameter using Feret diameters
+    # --- Filter by diameter using Feret diameters ---
     print("Filtering by diameter...")
     regions = measure.regionprops(declumped)
     valid_labels = []
@@ -345,9 +444,7 @@ def segment_vacuoles_improved(
     
     if not valid_labels:
         print("No valid vacuoles found after diameter filtering")
-        return create_empty_results(
-            cell_masks, cytoplasm_masks, nuclei_detection, nuclei_centroids, segment_cells
-        )
+        return create_empty_results(cell_masks, cytoplasm_masks, nuclei_detection, nuclei_centroids, segment_cells)
     
     print(f"After diameter filtering: {len(valid_labels)} valid vacuoles")
     
@@ -364,7 +461,7 @@ def segment_vacuoles_improved(
     else:
         cell_ids = np.array([])
     
-    # Prepare nuclei detection if enabled
+    # Prepare nuclei detection
     nuclei_img = None
     if nuclei_detection:
         nuclei_channel_index = (
@@ -395,7 +492,7 @@ def segment_vacuoles_improved(
     else:
         vacuoles_per_cell = {}
     
-    # Process each vacuole (same as original)
+    # --- Process each vacuole ---
     print("Processing vacuole-cell associations...")
     for vacuole_id in range(1, num_vacuoles + 1):
         if vacuole_id not in vacuole_regions:
@@ -471,7 +568,7 @@ def segment_vacuoles_improved(
             mapping_entry["overlap_ratio"] = None
             vacuole_cell_mapping.append(mapping_entry)
     
-    # Create DataFrames and summaries (same as original)
+    # --- Create DataFrames and summaries ---
     vacuole_cell_df = pd.DataFrame(vacuole_cell_mapping)
     
     # Create cell summary
@@ -708,93 +805,3 @@ def create_empty_results(
         return empty_vacuole_masks, cell_vacuole_table, cytoplasm_masks
     else:
         return empty_vacuole_masks, cell_vacuole_table
-
-
-def shape_based_declumping(binary_mask, vacuole_img=None, min_distance=20, proportion_threshold=0.12):
-    """
-    Split connected components only when the separating boundary (watershed cut)
-    is short relative to the region perimeter.
-
-    Parameters
-    ----------
-    binary_mask : ndarray (bool)
-        Input binary vacuole mask (before declumping).
-    vacuole_img : ndarray or None
-        Intensity image (optional, used for smoothing peaks); if None, only distance peaks are used.
-    min_distance : int
-        min_distance for peak_local_max (controls marker spacing).
-    proportion_threshold : float
-        If boundary_length / perimeter < proportion_threshold, accept the split.
-        e.g. 0.12 -> cut < 12% of perimeter accepted.
-    Returns
-    -------
-    labeled : ndarray (int)
-        Labeled mask after shape-based declumping (labels start at 1).
-    """
-    labeled_out = np.zeros_like(binary_mask, dtype=int)
-    next_label = 1
-
-    # label connected regions first
-    regions_lab, n = ndimage.label(binary_mask)
-    for region_label in range(1, n + 1):
-        region_mask = regions_lab == region_label
-        if region_mask.sum() == 0:
-            continue
-
-        # distance transform and peaks
-        dist = ndimage.distance_transform_edt(region_mask)
-        if vacuole_img is not None:
-            sm = ndimage.gaussian_filter(vacuole_img * region_mask, sigma=2)
-            # use intensity + distance peaks optionally — here we stick to distance peaks for markers
-        # find peaks
-        peaks = feature.peak_local_max(dist, min_distance=min_distance, labels=region_mask, exclude_border=False)
-        if len(peaks) <= 1:
-            # nothing to split; assign same label
-            labeled_out[region_mask] = next_label
-            next_label += 1
-            continue
-
-        # create markers and watershed inside this region
-        markers = np.zeros_like(region_mask, dtype=int)
-        markers[tuple(peaks.T)] = np.arange(1, len(peaks) + 1)
-        # apply watershed on negative distance (within region only)
-        local_watershed = segmentation.watershed(-dist, markers, mask=region_mask)
-
-        # compute boundary length between different watershed labels
-        # boundary pixels where local_watershed has neighboring unequal labels and inside region
-        boundary_mask = np.zeros_like(region_mask, dtype=bool)
-        # shift-check neighbors to find boundaries
-        lab = local_watershed
-        for dy, dx in ((0,1),(1,0),(-1,0),(0,-1)):
-            neighbor = np.roll(lab, shift=(dy,dx), axis=(0,1))
-            # zero out rolled-in edges
-            if dy == 1:
-                neighbor[0,:] = 0
-            if dy == -1:
-                neighbor[-1,:] = 0
-            if dx == 1:
-                neighbor[:,0] = 0
-            if dx == -1:
-                neighbor[:,-1] = 0
-            boundary_mask |= (lab != neighbor) & (lab > 0) & (neighbor > 0)
-
-        boundary_length = np.sum(boundary_mask)
-        # compute perimeter using regionprops (perimeter approximates boundary length)
-        prop = measure.regionprops(region_mask.astype(np.uint8))[0]
-        perimeter = prop.perimeter if prop.perimeter > 0 else 1.0
-
-        # decide whether to accept split
-        if (boundary_length / perimeter) < proportion_threshold:
-            # accept: assign each sublabel as a unique label in output
-            sublabels = np.unique(local_watershed)
-            sublabels = sublabels[sublabels > 0]
-            for s in sublabels:
-                mask_s = local_watershed == s
-                labeled_out[mask_s] = next_label
-                next_label += 1
-        else:
-            # reject: keep as single object
-            labeled_out[region_mask] = next_label
-            next_label += 1
-
-    return labeled_out
