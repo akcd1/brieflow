@@ -146,9 +146,12 @@ def get_metadata_wildcard_combos(
             col for col in metadata_samples_df.columns if col != "sample_fp"
         ]
         return metadata_samples_df[metadata_columns].drop_duplicates().astype(str)
-    else:
+    elif not samples_df.empty and "sample_fp" in samples_df.columns:
         # Use image file structure for metadata extraction
         return samples_df.drop(columns=["sample_fp"]).drop_duplicates().astype(str)
+    else:
+        # Return empty DataFrame if no data available
+        return pd.DataFrame()
 
 
 def get_output_pattern(wildcard_combos: pd.DataFrame) -> Dict[str, str]:
