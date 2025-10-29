@@ -15,6 +15,8 @@ from skimage import filters, morphology, measure, segmentation, feature, exposur
 import cv2
 
 
+
+
 def get_feret_diameters(coords):
     """Compute the minimum and maximum Feret diameters of a 2D shape."""
     cnt = coords.astype(np.int32)
@@ -237,6 +239,8 @@ def segment_vacuoles_improved(
     use_enhanced_declumping=True,
     h_minima_percentile=20,
     opening_disk_radius=1,
+    use_shape_based_declumping=True,
+    proportion_threshold=0.12,       
 ):
     """
     Improved vacuole segmentation with better clump handling.
@@ -265,67 +269,57 @@ def segment_vacuoles_improved(
     """
     segment_cells = cell_masks is not None
     
-    # Extract and prepare vacuole channel
     vacuole_img = image[vacuole_channel_index]
     vacuole_img = np.clip(vacuole_img, a_min=0, a_max=None)
-    
-    # Apply thresholding (improved method)
+
+    # --- Thresholding ---
     if use_multi_threshold:
-        print("Using multi-threshold segmentation...")
         binary_mask = multi_threshold_segmentation(vacuole_img, sigma=threshold_smoothing_scale)
     else:
-        # Original method
         vacuole_log = exposure.adjust_log(vacuole_img + 1)
         vacuole_smooth = filters.gaussian(vacuole_log, sigma=threshold_smoothing_scale)
         thresh = filters.threshold_otsu(vacuole_smooth)
         binary_mask = vacuole_smooth > thresh
         binary_mask = ndimage.binary_fill_holes(binary_mask)
     
-    # Check if we found anything
     if not np.any(binary_mask):
         print("No objects detected after thresholding")
-        return create_empty_results(
-            cell_masks, cytoplasm_masks, nuclei_detection, nuclei_centroids, segment_cells
-        )
-    
-    print(f"Initial mask: {np.sum(binary_mask)} pixels")
-    
-    # Apply morphological opening to separate connected vacuoles
+        return create_empty_results(cell_masks, cytoplasm_masks, nuclei_detection, nuclei_centroids, segment_cells)
+
+    # --- Morphological opening ---
     if use_morphological_opening:
-        print("Applying morphological opening...")
         binary_mask = apply_morphological_opening(binary_mask, opening_disk_radius=opening_disk_radius)
-        print(f"After opening: {np.sum(binary_mask)} pixels")
-    
-    # Declumping with enhanced watershed
+
+    # --- Enhanced declumping ---
     if use_enhanced_declumping:
-        print("Applying enhanced declumping...")
-        h_minima = None  # Will be auto-calculated based on percentile
         declumped = enhanced_declumping(
-            binary_mask, 
-            vacuole_img, 
+            binary_mask,
+            vacuole_img,
             min_distance=min_distance_between_maxima,
-            h_minima=h_minima
+            h_minima=None
         )
     else:
-        # Original watershed method
-        print("Applying standard watershed...")
         distance = ndimage.distance_transform_edt(binary_mask)
-        local_max = feature.peak_local_max(
-            distance, min_distance=min_distance_between_maxima, labels=binary_mask
-        )
+        local_max = feature.peak_local_max(distance, min_distance=min_distance_between_maxima, labels=binary_mask)
         markers = np.zeros_like(binary_mask, dtype=int)
         if len(local_max) > 0:
             markers[tuple(local_max.T)] = np.arange(1, len(local_max) + 1)
             declumped = segmentation.watershed(-distance, markers, mask=binary_mask)
-            missing = (declumped == 0) & binary_mask
-            if np.any(missing):
-                labeled_missing, _ = ndimage.label(missing)
-                labeled_missing[labeled_missing > 0] += declumped.max()
-                declumped += labeled_missing
         else:
             declumped, _ = ndimage.label(binary_mask)
-    
-    print(f"After declumping: {len(np.unique(declumped)) - 1} objects")
+
+    print(f"After enhanced declumping: {len(np.unique(declumped)) - 1} objects")
+
+    # --- Shape-based declumping (NEW STAGE) ---
+    if use_shape_based_declumping:
+        print("Applying shape-based declumping refinement...")
+        declumped = shape_based_declumping(
+            declumped > 0,
+            vacuole_img=vacuole_img,
+            min_distance=min_distance_between_maxima,
+            proportion_threshold=proportion_threshold,
+        )
+        print(f"After shape-based declumping: {len(np.unique(declumped)) - 1} objects")
     
     # Fill holes after declumping
     unique_labels = np.unique(declumped[declumped > 0])
@@ -714,3 +708,93 @@ def create_empty_results(
         return empty_vacuole_masks, cell_vacuole_table, cytoplasm_masks
     else:
         return empty_vacuole_masks, cell_vacuole_table
+
+
+def shape_based_declumping(binary_mask, vacuole_img=None, min_distance=20, proportion_threshold=0.12):
+    """
+    Split connected components only when the separating boundary (watershed cut)
+    is short relative to the region perimeter.
+
+    Parameters
+    ----------
+    binary_mask : ndarray (bool)
+        Input binary vacuole mask (before declumping).
+    vacuole_img : ndarray or None
+        Intensity image (optional, used for smoothing peaks); if None, only distance peaks are used.
+    min_distance : int
+        min_distance for peak_local_max (controls marker spacing).
+    proportion_threshold : float
+        If boundary_length / perimeter < proportion_threshold, accept the split.
+        e.g. 0.12 -> cut < 12% of perimeter accepted.
+    Returns
+    -------
+    labeled : ndarray (int)
+        Labeled mask after shape-based declumping (labels start at 1).
+    """
+    labeled_out = np.zeros_like(binary_mask, dtype=int)
+    next_label = 1
+
+    # label connected regions first
+    regions_lab, n = ndimage.label(binary_mask)
+    for region_label in range(1, n + 1):
+        region_mask = regions_lab == region_label
+        if region_mask.sum() == 0:
+            continue
+
+        # distance transform and peaks
+        dist = ndimage.distance_transform_edt(region_mask)
+        if vacuole_img is not None:
+            sm = ndimage.gaussian_filter(vacuole_img * region_mask, sigma=2)
+            # use intensity + distance peaks optionally — here we stick to distance peaks for markers
+        # find peaks
+        peaks = feature.peak_local_max(dist, min_distance=min_distance, labels=region_mask, exclude_border=False)
+        if len(peaks) <= 1:
+            # nothing to split; assign same label
+            labeled_out[region_mask] = next_label
+            next_label += 1
+            continue
+
+        # create markers and watershed inside this region
+        markers = np.zeros_like(region_mask, dtype=int)
+        markers[tuple(peaks.T)] = np.arange(1, len(peaks) + 1)
+        # apply watershed on negative distance (within region only)
+        local_watershed = segmentation.watershed(-dist, markers, mask=region_mask)
+
+        # compute boundary length between different watershed labels
+        # boundary pixels where local_watershed has neighboring unequal labels and inside region
+        boundary_mask = np.zeros_like(region_mask, dtype=bool)
+        # shift-check neighbors to find boundaries
+        lab = local_watershed
+        for dy, dx in ((0,1),(1,0),(-1,0),(0,-1)):
+            neighbor = np.roll(lab, shift=(dy,dx), axis=(0,1))
+            # zero out rolled-in edges
+            if dy == 1:
+                neighbor[0,:] = 0
+            if dy == -1:
+                neighbor[-1,:] = 0
+            if dx == 1:
+                neighbor[:,0] = 0
+            if dx == -1:
+                neighbor[:,-1] = 0
+            boundary_mask |= (lab != neighbor) & (lab > 0) & (neighbor > 0)
+
+        boundary_length = np.sum(boundary_mask)
+        # compute perimeter using regionprops (perimeter approximates boundary length)
+        prop = measure.regionprops(region_mask.astype(np.uint8))[0]
+        perimeter = prop.perimeter if prop.perimeter > 0 else 1.0
+
+        # decide whether to accept split
+        if (boundary_length / perimeter) < proportion_threshold:
+            # accept: assign each sublabel as a unique label in output
+            sublabels = np.unique(local_watershed)
+            sublabels = sublabels[sublabels > 0]
+            for s in sublabels:
+                mask_s = local_watershed == s
+                labeled_out[mask_s] = next_label
+                next_label += 1
+        else:
+            # reject: keep as single object
+            labeled_out[region_mask] = next_label
+            next_label += 1
+
+    return labeled_out
