@@ -9,6 +9,9 @@ It includes functions for:
 4. Cytoplasm Adjustment: Updating cytoplasm masks by removing vacuole regions.
 5. Visualization: Creating enhanced visualizations of cells, vacuoles, and detected nuclei.
 
+MODIFIED FOR OPTIONAL CELL SEGMENTATION:
+- segment_cells parameter allows processing vacuoles without cell masks
+- When cell_masks=None, all detected vacuoles are kept (no cell association)
 """
 
 import numpy as np
@@ -78,7 +81,8 @@ def segment_vacuoles(
         vacuole_channel_index (int): Index of the channel used for vacuole detection.
         nuclei_channel_index (int, optional): Index of the channel for detecting nuclei/peaks within vacuoles.
             If None, the same channel as vacuole_channel_index will be used.
-        cell_masks (numpy.ndarray): Cell segmentation masks with unique integers for each cell.
+        cell_masks (numpy.ndarray, optional): Cell segmentation masks with unique integers for each cell.
+            If None, all detected vacuoles are kept without cell association.
         cytoplasm_masks (numpy.ndarray, optional): Cytoplasm segmentation masks with unique integers.
             If provided, vacuole regions will be removed from cytoplasm masks.
         vacuole_min_size (float, optional): Minimum diameter (in pixels) for a vacuole to be considered valid. Default is 10.
@@ -86,7 +90,9 @@ def segment_vacuoles(
         threshold_smoothing_scale (float, optional): Sigma for Gaussian smoothing before thresholding. Default is 1.3488.
         min_distance_between_maxima (int, optional): Minimum distance between local maxima for declumping vacuoles. Default is 20.
         max_objects_per_cell (int, optional): Maximum number of vacuoles allowed per cell. Default is 120.
+            Only used when cell_masks is provided.
         overlap_threshold (float, optional): Minimum overlap ratio required to associate a vacuole with a cell. Default is 0.1.
+            Only used when cell_masks is provided.
         nuclei_min_distance (int, optional): Minimum distance between peaks when identifying nuclei within vacuoles. Default is 5.
         nuclei_centroids (dict or pandas.DataFrame, optional): Dictionary or DataFrame containing nuclei centroids
             with keys/columns 'i', 'j' for y and x coordinates. Used to calculate distance from vacuoles to nuclei.
@@ -176,11 +182,11 @@ def segment_vacuoles(
 
     num_vacuoles = len(valid_labels)
 
-    # Get cell IDs once
+    # Get cell IDs once (if cell segmentation is enabled)
     if segment_cells:
         cell_ids = np.unique(cell_masks[cell_masks > 0])
     else:
-        cell_ids = np.array([]) 
+        cell_ids = np.array([])  # No cells to associate with
 
     # Determine nuclei channel and prepare nuclei image only if nuclei_detection is True
     nuclei_img = None
@@ -271,7 +277,7 @@ def segment_vacuoles(
             )
             mapping_entry["nearest_nucleus_id"] = nearest_nucleus_id
 
-        # Find best overlapping cell
+        # MODIFIED: Only do cell association if segment_cells=True
         if segment_cells:
             # Find best overlapping cell
             best_cell_id = None
@@ -308,7 +314,7 @@ def segment_vacuoles(
 
     # Create cell summary
     if segment_cells and vacuole_cell_mapping:
-        # Group by cell_id once for efficiency
+        # CELL SEGMENTATION WITH VACUOLES: Group by cell_id once for efficiency
         grouped = vacuole_cell_df.groupby("cell_id")
         cell_summary = []
 
@@ -365,7 +371,7 @@ def segment_vacuoles(
                     )
                     summary_entry["mean_distance_to_nucleus"] = mean_distance
 
-            elif segment_cells and not vacuole_cell_mapping:
+            else:  # Cell without vacuoles
                 summary_entry.update(
                     {
                         "has_vacuole": False,
@@ -389,46 +395,11 @@ def segment_vacuoles(
                 # Add cell nucleus distance fields if nuclei_centroids was provided
                 if nuclei_centroids_dict is not None:
                     summary_entry["mean_distance_to_nucleus"] = None
-            else:
-            # No cell segmentation - create image-level summary
-            cell_summary = [{
-                "cell_id": None,
-                "has_vacuole": len(vacuole_cell_mapping) > 0,
-                "num_vacuoles": len(vacuole_cell_mapping),
-                "vacuole_ids": [v["vacuole_id"] for v in vacuole_cell_mapping],
-                "cell_area": None,
-                "total_vacuole_area": sum(v["vacuole_area"] for v in vacuole_cell_mapping),
-                "vacuole_area_ratio": None,
-                "mean_vacuole_diameter": vacuole_cell_df["vacuole_diameter"].mean() if len(vacuole_cell_df) > 0 else None,
-            }]
-            
-            # Add nuclei detection fields if enabled
-            if nuclei_detection and len(vacuole_cell_df) > 0:
-                cell_summary[0].update({
-                    "total_nuclei_in_vacuoles": vacuole_cell_df["nuclei_count"].sum(),
-                    "multinucleated_vacuole_count": len(vacuole_cell_df[vacuole_cell_df["nuclei_count"] > 1]),
-                })
-            elif nuclei_detection:
-                cell_summary[0].update({
-                    "total_nuclei_in_vacuoles": 0,
-                    "multinucleated_vacuole_count": 0,
-                })
-                
-            # Add nucleus distance fields if available
-            if nuclei_centroids_dict is not None:
-                if len(vacuole_cell_df) > 0:
-                    cell_summary[0]["mean_distance_to_nucleus"] = (
-                        vacuole_cell_df["distance_to_nucleus"].dropna().mean()
-                        if not vacuole_cell_df["distance_to_nucleus"].dropna().empty
-                        else None
-                    )
-                else:
-                    cell_summary[0]["mean_distance_to_nucleus"] = None
-                    
+
             cell_summary.append(summary_entry)
 
-    else:
-        # Handle case with no vacuoles
+    elif segment_cells and not vacuole_cell_mapping:
+        # CELL SEGMENTATION BUT NO VACUOLES: Handle case with cells but no vacuoles
         cell_summary = []
         for cell_id in cell_ids:
             cell_area = np.sum(cell_masks == cell_id)
@@ -457,6 +428,42 @@ def segment_vacuoles(
                 summary_entry["mean_distance_to_nucleus"] = None
 
             cell_summary.append(summary_entry)
+
+    else:
+        # NO CELL SEGMENTATION: Create image-level summary
+        cell_summary = [{
+            "cell_id": None,
+            "has_vacuole": len(vacuole_cell_mapping) > 0,
+            "num_vacuoles": len(vacuole_cell_mapping),
+            "vacuole_ids": [v["vacuole_id"] for v in vacuole_cell_mapping],
+            "cell_area": None,
+            "total_vacuole_area": sum(v["vacuole_area"] for v in vacuole_cell_mapping) if vacuole_cell_mapping else 0,
+            "vacuole_area_ratio": None,
+            "mean_vacuole_diameter": vacuole_cell_df["vacuole_diameter"].mean() if len(vacuole_cell_df) > 0 else None,
+        }]
+        
+        # Add nuclei detection fields if enabled
+        if nuclei_detection and len(vacuole_cell_df) > 0:
+            cell_summary[0].update({
+                "total_nuclei_in_vacuoles": vacuole_cell_df["nuclei_count"].sum(),
+                "multinucleated_vacuole_count": len(vacuole_cell_df[vacuole_cell_df["nuclei_count"] > 1]),
+            })
+        elif nuclei_detection:
+            cell_summary[0].update({
+                "total_nuclei_in_vacuoles": 0,
+                "multinucleated_vacuole_count": 0,
+            })
+            
+        # Add nucleus distance fields if available
+        if nuclei_centroids_dict is not None:
+            if len(vacuole_cell_df) > 0:
+                cell_summary[0]["mean_distance_to_nucleus"] = (
+                    vacuole_cell_df["distance_to_nucleus"].dropna().mean()
+                    if not vacuole_cell_df["distance_to_nucleus"].dropna().empty
+                    else None
+                )
+            else:
+                cell_summary[0]["mean_distance_to_nucleus"] = None
 
     # Create final results
     cell_summary_df = pd.DataFrame(cell_summary)
@@ -497,8 +504,10 @@ def segment_vacuoles(
             vacuole_id = mapping["vacuole_id"]
             cell_id = mapping["cell_id"]
             vacuole_mask = associated_vacuoles == vacuole_id
-            cytoplasm_mask = updated_cytoplasm_masks == cell_id
-            updated_cytoplasm_masks[cytoplasm_mask & vacuole_mask] = 0
+            # Only remove from cytoplasm if cell_id is not None (i.e., segment_cells=True)
+            if cell_id is not None:
+                cytoplasm_mask = updated_cytoplasm_masks == cell_id
+                updated_cytoplasm_masks[cytoplasm_mask & vacuole_mask] = 0
         print(
             f"Updated cytoplasm masks by removing {len(vacuole_cell_mapping)} vacuole regions"
         )
@@ -515,7 +524,7 @@ def create_empty_results(
     cytoplasm_masks, 
     nuclei_detection=False, 
     nuclei_centroids=None,
-    segment_cells=True  # ← NEW PARAMETER
+    segment_cells=True
 ):
     """Helper function to create empty results when no vacuoles are found."""
     
@@ -605,7 +614,8 @@ def create_vacuole_boundary_visualization(
     Args:
         image (numpy.ndarray): Multichannel image data with shape [channels, height, width].
         vacuole_channel_index (int): Index of the channel used for vacuole detection.
-        cell_masks (numpy.ndarray): Cell segmentation masks with unique integers for each cell.
+        cell_masks (numpy.ndarray, optional): Cell segmentation masks with unique integers for each cell.
+            If None, only vacuole boundaries will be shown (no cell boundaries).
         vacuole_masks (numpy.ndarray): Vacuole segmentation masks with original vacuole IDs.
         vacuole_cell_mapping (pandas.DataFrame, optional): DataFrame containing mapping between vacuoles and cells,
             including peak coordinates.
@@ -646,49 +656,58 @@ def create_vacuole_boundary_visualization(
             for c in range(num_channels):
                 enhanced_img[c] = base_norm
 
-        # Add cell boundaries (green)
-        if base_is_multichannel:
-            # For multichannel image, we need to create a temporary RGB image
-            # to use mark_boundaries, then extract the green channel
-            temp_img = np.zeros((height, width, 3), dtype=np.float32)
-            for c in range(min(3, num_channels)):
-                temp_img[:, :, c] = enhanced_img[c] / (
-                    enhanced_img[c].max() if enhanced_img[c].max() > 0 else 1.0
+        # Add cell boundaries (green) - only if cell_masks is provided
+        if cell_masks is not None:
+            if base_is_multichannel:
+                # For multichannel image, we need to create a temporary RGB image
+                # to use mark_boundaries, then extract the green channel
+                temp_img = np.zeros((height, width, 3), dtype=np.float32)
+                for c in range(min(3, num_channels)):
+                    temp_img[:, :, c] = enhanced_img[c] / (
+                        enhanced_img[c].max() if enhanced_img[c].max() > 0 else 1.0
+                    )
+
+                cell_boundary_img = mark_boundaries(
+                    temp_img,
+                    cell_masks,
+                    color=(0, 1, 0),  # Green for cells
+                    mode="thick",
                 )
 
-            cell_boundary_img = mark_boundaries(
-                temp_img,
-                cell_masks,
-                color=(0, 1, 0),  # Green for cells
-                mode="thick",
-            )
-
-            # Update the green channel with cell boundaries - make them more prominent
-            cell_boundary_intensity = (
-                1.2 * enhanced_img[1].max()
-            )  # Increase intensity by 20%
-            enhanced_img[1] = np.maximum(
-                enhanced_img[1], cell_boundary_img[:, :, 1] * cell_boundary_intensity
-            )
-            # Cap values at 1.0 if normalized
-            if enhanced_img.dtype == np.float32 or enhanced_img.dtype == np.float64:
-                enhanced_img[1] = np.minimum(
-                    enhanced_img[1],
-                    1.0 if enhanced_img[1].max() <= 1.0 else enhanced_img[1].max(),
+                # Update the green channel with cell boundaries - make them more prominent
+                cell_boundary_intensity = (
+                    1.2 * enhanced_img[1].max()
+                )  # Increase intensity by 20%
+                enhanced_img[1] = np.maximum(
+                    enhanced_img[1], cell_boundary_img[:, :, 1] * cell_boundary_intensity
                 )
-        else:
-            # For single channel image, directly add boundaries to green channel
-            cell_boundary = mark_boundaries(
-                base_image,
-                cell_masks,
-                color=(0, 1, 0),  # Green for cells
-                mode="thick",
-            )
-            enhanced_img[1] = np.maximum(enhanced_img[1], cell_boundary[:, :, 1])
+                # Cap values at 1.0 if normalized
+                if enhanced_img.dtype == np.float32 or enhanced_img.dtype == np.float64:
+                    enhanced_img[1] = np.minimum(
+                        enhanced_img[1],
+                        1.0 if enhanced_img[1].max() <= 1.0 else enhanced_img[1].max(),
+                    )
+            else:
+                # For single channel image, directly add boundaries to green channel
+                cell_boundary = mark_boundaries(
+                    base_image,
+                    cell_masks,
+                    color=(0, 1, 0),  # Green for cells
+                    mode="thick",
+                )
+                enhanced_img[1] = np.maximum(enhanced_img[1], cell_boundary[:, :, 1])
 
         # Add vacuole boundaries (magenta: red + blue)
         if base_is_multichannel:
-            # For multichannel image, create temporary RGB again
+            # For multichannel image, create temporary RGB (or reuse if already created for cells)
+            if cell_masks is None:
+                # Create temp_img if not already created above
+                temp_img = np.zeros((height, width, 3), dtype=np.float32)
+                for c in range(min(3, num_channels)):
+                    temp_img[:, :, c] = enhanced_img[c] / (
+                        enhanced_img[c].max() if enhanced_img[c].max() > 0 else 1.0
+                    )
+            
             vacuole_boundary_img = mark_boundaries(
                 temp_img,
                 vacuole_masks > 0,  # Binary mask
@@ -770,3 +789,4 @@ def create_vacuole_boundary_visualization(
     panel = create_micropanel(microimages, add_channel_label=True)
 
     return panel
+
