@@ -249,6 +249,61 @@ PHENOTYPE_OUTPUT_MAPPINGS = {
 
 PHENOTYPE_OUTPUTS_MAPPED = map_outputs(PHENOTYPE_OUTPUTS, PHENOTYPE_OUTPUT_MAPPINGS)
 
+# =====================================================================
+# MODIFIED: Conditional targets based on segment_cells parameter
+# =====================================================================
+
+# Define base outputs that are ALWAYS required (work with or without cells)
+ALWAYS_REQUIRED_OUTPUTS = [
+    "apply_ic_field_phenotype",
+    "align_phenotype",
+    "segment_phenotype",
+    "extract_phenotype_info",
+    "combine_phenotype_info",
+    "identify_vacuoles",
+    "extract_phenotype_vacuoles",
+    "merge_phenotype_vacuoles",
+]
+
+# Define outputs that are ONLY required when segment_cells=true
+CELL_DEPENDENT_OUTPUTS = [
+    "identify_cytoplasm",
+    "extract_phenotype_cp",
+    "merge_vacuoles_phenotype_cp",
+    "merge_phenotype_cp",
+    "eval_segmentation_phenotype",
+    "eval_features",
+]
+
+# Build the targets list conditionally
+if config["phenotype"]["segment_cells"]:
+    # WITH CELL SEGMENTATION: Include all outputs
+    outputs_to_include = ALWAYS_REQUIRED_OUTPUTS + CELL_DEPENDENT_OUTPUTS
+    print("✓ Phenotype workflow: Cell segmentation enabled - including all outputs")
+else:
+    # WITHOUT CELL SEGMENTATION: Only include base outputs
+    outputs_to_include = ALWAYS_REQUIRED_OUTPUTS
+    print("✓ Phenotype workflow: Cell segmentation disabled - skipping cell-dependent outputs")
+
+# Filter PHENOTYPE_OUTPUTS to only include the desired outputs
+PHENOTYPE_OUTPUTS_FILTERED = {
+    key: value for key, value in PHENOTYPE_OUTPUTS.items() 
+    if key in outputs_to_include
+}
+
+# Filter PHENOTYPE_OUTPUT_MAPPINGS to match
+PHENOTYPE_OUTPUT_MAPPINGS_FILTERED = {
+    key: value for key, value in PHENOTYPE_OUTPUT_MAPPINGS.items() 
+    if key in outputs_to_include
+}
+
+# Generate targets from the filtered outputs
 PHENOTYPE_TARGETS_ALL = outputs_to_targets(
-    PHENOTYPE_OUTPUTS, phenotype_wildcard_combos, PHENOTYPE_OUTPUT_MAPPINGS
+    PHENOTYPE_OUTPUTS_FILTERED, 
+    phenotype_wildcard_combos, 
+    PHENOTYPE_OUTPUT_MAPPINGS_FILTERED
 )
+
+# Debug information (optional - uncomment to see what's happening)
+# print(f"  - Total output types: {len(PHENOTYPE_OUTPUTS_FILTERED)}/{len(PHENOTYPE_OUTPUTS)}")
+# print(f"  - Total target files: {len(PHENOTYPE_TARGETS_ALL)}")
