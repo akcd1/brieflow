@@ -2,7 +2,7 @@ from tifffile import imread, imwrite
 import pandas as pd
 import numpy as np
 
-from lib.phenotype.identify_vacuoles import segment_vacuoles
+from lib.phenotype.identify_vacuoles import segment_vacuoles_improved
 
 # Load aligned phenotype image (always present)
 data_phenotype = imread(snakemake.input[0])
@@ -24,7 +24,7 @@ else:
     print(f"✓ Cell segmentation disabled: Processing all vacuoles without cell association")
 
 # Segment vacuoles
-result = segment_vacuoles(
+result = segment_vacuoles_improved(
     image=data_phenotype,
     vacuole_channel_index=snakemake.params.vacuole_channel_index,
     nuclei_channel_index=snakemake.params.vacuole_channel_index,
