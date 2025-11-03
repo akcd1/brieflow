@@ -21,7 +21,9 @@ else:
     cells = None
     cytoplasms = None
     phenotype_info = None  # No phenotype info available
-    print(f"✓ Cell segmentation disabled: Processing all vacuoles without cell association")
+    print(
+        f"✓ Cell segmentation disabled: Processing all vacuoles without cell association"
+    )
 
 # Segment vacuoles
 result = segment_vacuoles_improved(
@@ -32,9 +34,10 @@ result = segment_vacuoles_improved(
     cytoplasm_masks=cytoplasms,
     vacuole_min_size=snakemake.params.vacuole_min_size,
     vacuole_max_size=snakemake.params.vacuole_max_size,
-    nuclei_centroids=phenotype_info,  # Can be None
-    nuclei_detection=snakemake.params.nuclei_detection,
-    nuclei_min_distance=snakemake.params.min_distance_between_maxima,
+    nuclei_centroids=phenotype_info,
+    threshold_smoothing_scale=snakemake.params.threshold_smoothing_scale,
+    min_distance_between_maxima=snakemake.params.min_distance_between_maxima,
+    proportion_threshold=snakemake.params.proportion_threshold,
 )
 
 # Unpack results based on whether cytoplasm masks were provided
@@ -43,7 +46,9 @@ if cytoplasms is not None:
 else:
     vacuole_masks, cell_vacuole_table = result
     # Create empty cytoplasm masks for consistency with the correct shape
-    updated_cytoplasm_masks = np.zeros(data_phenotype.shape[1:], dtype=np.uint16)  # Use image shape
+    updated_cytoplasm_masks = np.zeros(
+        data_phenotype.shape[1:], dtype=np.uint16
+    )  # Use image shape
 
 # Save vacuole masks
 imwrite(snakemake.output[0], vacuole_masks)
@@ -57,12 +62,12 @@ vacuole_cell_mapping_df["table_type"] = "vacuole_cell_mapping"
 
 # Prefix columns to avoid conflicts
 cell_summary_cols = {
-    col: f"cell_summary_{col}" 
-    for col in cell_summary_df.columns if col != "table_type"
+    col: f"cell_summary_{col}" for col in cell_summary_df.columns if col != "table_type"
 }
 vacuole_mapping_cols = {
     col: f"vacuole_mapping_{col}"
-    for col in vacuole_cell_mapping_df.columns if col != "table_type"
+    for col in vacuole_cell_mapping_df.columns
+    if col != "table_type"
 }
 
 cell_summary_df = cell_summary_df.rename(columns=cell_summary_cols)

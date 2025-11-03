@@ -78,8 +78,6 @@ if config["phenotype"]["segment_cells"]:
             "../scripts/shared/combine_dfs.py"
 
 
-# Identify vacuoles from aligned phenotype image and cell segmentation
-# MODIFIED: Inputs are now conditional based on segment_cells parameter
 rule identify_vacuoles:
     input:
         # aligned phenotype image (always required)
@@ -101,9 +99,10 @@ rule identify_vacuoles:
         vacuole_channel_index=config["phenotype"]["vacuole_channel_index"],
         vacuole_min_size=config["phenotype"]["vacuole_min_size"],
         vacuole_max_size=config["phenotype"]["vacuole_max_size"],
-        nuclei_detection=config["phenotype"]["nuclei_detection"],
         min_distance_between_maxima=config["phenotype"]["min_distance_between_maxima"],
-        segment_cells=config["phenotype"]["segment_cells"],  # NEW PARAMETER
+        threshold_smoothing_scale=config["phenotype"]["threshold_smoothing_scale"],
+        proportion_threshold=config["phenotype"]["proportion_threshold"],
+        segment_cells=config["phenotype"]["segment_cells"],
     script:
         "../scripts/phenotype/identify_vacuoles.py"
 

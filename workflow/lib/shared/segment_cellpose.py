@@ -157,7 +157,9 @@ def segment_cellpose(
             return nuclei
 
 
-def prepare_cellpose(data, dapi_index, cyto_index=None, logscale=True, log_kwargs=dict()):
+def prepare_cellpose(
+    data, dapi_index, cyto_index=None, logscale=True, log_kwargs=dict()
+):
     """Prepare a three-channel RGB image for use with the Cellpose GUI.
 
     Args:
@@ -172,11 +174,11 @@ def prepare_cellpose(data, dapi_index, cyto_index=None, logscale=True, log_kwarg
     """
     # Extract DAPI channel
     dapi = data[dapi_index]
-    
+
     # Extract or create cytoplasmic channel
     if cyto_index is not None:
         cyto = data[cyto_index]
-        
+
         # Apply log scaling to the cytoplasmic channel if specified
         if logscale:
             cyto = image_log_scale(cyto, **log_kwargs)

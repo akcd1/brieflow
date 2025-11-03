@@ -14,18 +14,23 @@ def get_plate_vacuole_inputs(wildcards):
     checkpoint_output = checkpoints.create_tile_info.get(**wildcards).output[0]
     tile_info = pd.read_csv(checkpoint_output, sep="\t")
     plate_tiles = tile_info[tile_info["plate"] == wildcards.plate]
-    
+
     return expand(
-        str(PHENOTYPE_FP / "tsvs" / get_filename(
-            {"plate": "{plate}", "well": "{well}", "tile": "{tile}"},
-            "phenotype_vacuoles",
-            "tsv"
-        )),
+        str(
+            PHENOTYPE_FP
+            / "tsvs"
+            / get_filename(
+                {"plate": "{plate}", "well": "{well}", "tile": "{tile}"},
+                "phenotype_vacuoles",
+                "tsv",
+            )
+        ),
         zip,
         plate=[wildcards.plate] * len(plate_tiles),
         well=plate_tiles["well"].tolist(),
-        tile=plate_tiles["tile"].tolist()
+        tile=plate_tiles["tile"].tolist(),
     )
+
 
 def get_alignment_params(wildcards, config: Dict[str, Any]) -> Dict[str, Any]:
     """Get alignment parameters for a specific plate.
