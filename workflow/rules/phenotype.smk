@@ -154,7 +154,7 @@ rule merge_phenotype_vacuoles:
         lambda wildcards: output_to_input(
             PHENOTYPE_OUTPUTS["extract_phenotype_vacuoles"],
             wildcards=wildcards,
-            expansion_values=["tile"],
+            expansion_values=["well", "tile"],
             metadata_combos=phenotype_wildcard_combos,
         )
     output:
