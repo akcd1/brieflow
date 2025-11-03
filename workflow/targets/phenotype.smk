@@ -111,10 +111,11 @@ PHENOTYPE_OUTPUTS = {
         ),
     ],
     "merge_phenotype_vacuoles": [
+        # ALWAYS aggregate at plate level
         PHENOTYPE_FP
         / "parquets"
         / get_filename(
-            {"plate": "{plate}", "well": "{well}"}, "phenotype_vacuoles", "parquet"
+            {"plate": "{plate}"}, "phenotype_vacuoles", "parquet"
         ),
     ],
     "merge_vacuoles_phenotype_cp": [
@@ -220,11 +221,9 @@ CELL_DEPENDENT_OUTPUTS = [
 if config["phenotype"]["segment_cells"]:
     # WITH CELL SEGMENTATION: Include all outputs
     outputs_to_include = ALWAYS_REQUIRED_OUTPUTS + CELL_DEPENDENT_OUTPUTS
-    print("✓ Phenotype workflow: Cell segmentation enabled - including all outputs")
 else:
     # WITHOUT CELL SEGMENTATION: Only include base outputs
     outputs_to_include = ALWAYS_REQUIRED_OUTPUTS
-    print("✓ Phenotype workflow: Cell segmentation disabled - skipping cell-dependent outputs")
 
 # Filter PHENOTYPE_OUTPUTS to only include the desired outputs
 PHENOTYPE_OUTPUTS_FILTERED = {

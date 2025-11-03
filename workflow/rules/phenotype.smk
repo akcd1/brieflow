@@ -1,5 +1,5 @@
 from lib.shared.target_utils import output_to_input
-from lib.shared.rule_utils import get_alignment_params, get_segmentation_params
+from lib.shared.rule_utils import get_alignment_params, get_segmentation_params, get_plate_vacuole_inputs
 
 
 # Apply illumination correction field
@@ -152,14 +152,7 @@ rule extract_phenotype_vacuoles:
 # Combine vacuole phenotype results from different tiles
 rule merge_phenotype_vacuoles:
     input:
-        lambda wildcards: output_to_input(
-            PHENOTYPE_OUTPUTS["extract_phenotype_vacuoles"],
-            wildcards=wildcards,
-            expansion_values=["tile"],
-            metadata_combos=phenotype_wildcard_combos,
-        ),
-    params:
-        channel_names=config["phenotype"]["channel_names"],
+        get_plate_vacuole_inputs
     output:
         PHENOTYPE_OUTPUTS_MAPPED["merge_phenotype_vacuoles"],
     script:

@@ -18,7 +18,7 @@ arr_reads = Parallel(n_jobs=snakemake.threads)(
 # Combine all dataframes, filtering out None values
 valid_dfs = [df for df in arr_reads if df is not None]
 if valid_dfs:
-    vacuole_phenotype = pd.concat(valid_dfs)
+    vacuole_phenotype = pd.concat(valid_dfs, ignore_index=True)
     print(
         f"Combined {len(valid_dfs)} files with a total of {len(vacuole_phenotype)} vacuole records"
     )
@@ -28,3 +28,4 @@ else:
 
 # Save the combined vacuole phenotype data
 vacuole_phenotype.to_parquet(snakemake.output[0])
+print(f"✓ Saved plate-level vacuole phenotype data to {snakemake.output[0]}")
