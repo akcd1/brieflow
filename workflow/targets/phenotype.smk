@@ -186,67 +186,6 @@ PHENOTYPE_OUTPUT_MAPPINGS = {
     "eval_features": None,
 }
 
-# TODO: test and implement segmentation paramsearch for updated brieflow setup
-# if config["phenotype"]["mode"] == "segment_phenotype_paramsearch":
-#     PHENOTYPE_OUTPUTS.update(
-#         {
-#             "segment_phenotype_paramsearch": [
-#                 PHENOTYPE_FP
-#                 / "paramsearch"
-#                 / "images"
-#                 / get_filename(
-#                     {"well": "{well}", "tile": "{tile}"},
-#                     f"paramsearch_nd{'{nuclei_diameter}'}_cd{'{cell_diameter}'}_ft{'{flow_threshold}'}_cp{'{cellprob_threshold}'}_nuclei",
-#                     "tiff",
-#                 ),
-#                 PHENOTYPE_FP
-#                 / "paramsearch"
-#                 / "images"
-#                 / get_filename(
-#                     {"well": "{well}", "tile": "{tile}"},
-#                     f"paramsearch_nd{'{nuclei_diameter}'}_cd{'{cell_diameter}'}_ft{'{flow_threshold}'}_cp{'{cellprob_threshold}'}_cells",
-#                     "tiff",
-#                 ),
-#                 PHENOTYPE_FP
-#                 / "paramsearch"
-#                 / "tsvs"
-#                 / get_filename(
-#                     {"well": "{well}", "tile": "{tile}"},
-#                     f"paramsearch_nd{'{nuclei_diameter}'}_cd{'{cell_diameter}'}_ft{'{flow_threshold}'}_cp{'{cellprob_threshold}'}_segmentation_stats",
-#                     "tsv",
-#                 ),
-#             ],
-#             "summarize_segment_phenotype_paramsearch": [
-#                 PHENOTYPE_FP / "paramsearch" / "summary" / "segmentation_summary.tsv",
-#                 PHENOTYPE_FP / "paramsearch" / "summary" / "segmentation_grouped.tsv",
-#                 PHENOTYPE_FP
-#                 / "paramsearch"
-#                 / "summary"
-#                 / "segmentation_evaluation.txt",
-#                 PHENOTYPE_FP / "paramsearch" / "summary" / "segmentation_panel.png",
-#             ],
-#         }
-#     )
-
-#     PHENOTYPE_OUTPUT_MAPPINGS.update(
-#         {
-#             "segment_phenotype_paramsearch": None,
-#             "summarize_segment_phenotype_paramsearch": None,
-#         }
-#     )
-
-#     PHENOTYPE_WILDCARDS.update(
-#         {
-#             "nuclei_diameter": config["phenotype"]["paramsearch"]["nuclei_diameter"],
-#             "cell_diameter": config["phenotype"]["paramsearch"]["cell_diameter"],
-#             "flow_threshold": config["phenotype"]["paramsearch"]["flow_threshold"],
-#             "cellprob_threshold": config["phenotype"]["paramsearch"][
-#                 "cellprob_threshold"
-#             ],
-#         }
-#     )
-
-
 PHENOTYPE_OUTPUTS_MAPPED = map_outputs(PHENOTYPE_OUTPUTS, PHENOTYPE_OUTPUT_MAPPINGS)
 
 # =====================================================================
@@ -254,20 +193,22 @@ PHENOTYPE_OUTPUTS_MAPPED = map_outputs(PHENOTYPE_OUTPUTS, PHENOTYPE_OUTPUT_MAPPI
 # =====================================================================
 
 # Define base outputs that are ALWAYS required (work with or without cells)
+# FIXED: Removed outputs that depend on segmentation
 ALWAYS_REQUIRED_OUTPUTS = [
     "apply_ic_field_phenotype",
     "align_phenotype",
-    "segment_phenotype",
-    "extract_phenotype_info",
-    "combine_phenotype_info",
     "identify_vacuoles",
     "extract_phenotype_vacuoles",
     "merge_phenotype_vacuoles",
 ]
 
 # Define outputs that are ONLY required when segment_cells=true
+# FIXED: Moved segmentation-dependent outputs here
 CELL_DEPENDENT_OUTPUTS = [
+    "segment_phenotype",
     "identify_cytoplasm",
+    "extract_phenotype_info",
+    "combine_phenotype_info",
     "extract_phenotype_cp",
     "merge_vacuoles_phenotype_cp",
     "merge_phenotype_cp",

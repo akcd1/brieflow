@@ -374,7 +374,14 @@ def segment_vacuoles_improved(
     
     if not np.any(binary_mask):
         print("No objects detected after thresholding")
-        return create_empty_results(cell_masks, cytoplasm_masks, nuclei_detection, nuclei_centroids, segment_cells)
+        return create_empty_results(
+            cell_masks, 
+            cytoplasm_masks, 
+            nuclei_detection, 
+            nuclei_centroids, 
+            segment_cells,
+            image_shape=image.shape[1:]
+        )
 
     # --- FAILSAFE: Check for excessive objects early ---
     if max_total_objects is not None:
@@ -383,7 +390,14 @@ def segment_vacuoles_improved(
         if num_components > max_total_objects:
             print(f"FAILSAFE TRIGGERED: Detected {num_components} objects (limit: {max_total_objects})")
             print("Returning zero masks to avoid processing over-segmented image")
-            return create_empty_results(cell_masks, cytoplasm_masks, nuclei_detection, nuclei_centroids, segment_cells)
+            return create_empty_results(
+                cell_masks, 
+                cytoplasm_masks, 
+                nuclei_detection, 
+                nuclei_centroids, 
+                segment_cells,
+                image_shape=image.shape[1:]
+            )
 
     # --- Morphological opening ---
     if use_morphological_opening:
@@ -444,7 +458,14 @@ def segment_vacuoles_improved(
     
     if not valid_labels:
         print("No valid vacuoles found after diameter filtering")
-        return create_empty_results(cell_masks, cytoplasm_masks, nuclei_detection, nuclei_centroids, segment_cells)
+        return create_empty_results(
+            cell_masks, 
+            cytoplasm_masks, 
+            nuclei_detection, 
+            nuclei_centroids, 
+            segment_cells,
+            image_shape=image.shape[1:]
+        )
     
     print(f"After diameter filtering: {len(valid_labels)} valid vacuoles")
     
@@ -735,9 +756,19 @@ def create_empty_results(
     cytoplasm_masks, 
     nuclei_detection=False, 
     nuclei_centroids=None,
-    segment_cells=True
+    segment_cells=True,
+    image_shape=None
 ):
-    """Helper function to create empty results when no vacuoles are found."""
+    """Helper function to create empty results when no vacuoles are found.
+    
+    Args:
+        cell_masks: Cell segmentation masks (can be None)
+        cytoplasm_masks: Cytoplasm segmentation masks (can be None)
+        nuclei_detection: Whether nuclei detection is enabled
+        nuclei_centroids: DataFrame with nuclei centroids (can be None)
+        segment_cells: Whether cell segmentation is enabled
+        image_shape: Tuple of (height, width) for creating empty masks when no masks available
+    """
     
     if segment_cells and cell_masks is not None:
         cell_ids = np.unique(cell_masks[cell_masks > 0])
@@ -769,12 +800,15 @@ def create_empty_results(
             cell_summary.append(summary_entry)
     
     else:
+        # Determine the shape for empty masks
         if cell_masks is not None:
             empty_vacuole_masks = np.zeros_like(cell_masks)
         elif cytoplasm_masks is not None:
             empty_vacuole_masks = np.zeros_like(cytoplasm_masks)
+        elif image_shape is not None:
+            empty_vacuole_masks = np.zeros(image_shape, dtype=np.uint16)
         else:
-            raise ValueError("Need either cell_masks or cytoplasm_masks to determine image shape")
+            raise ValueError("Need either cell_masks, cytoplasm_masks, or image_shape to determine image dimensions")
         
         cell_summary = [{
             "cell_id": None,

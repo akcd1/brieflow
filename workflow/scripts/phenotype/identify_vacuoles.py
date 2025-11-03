@@ -7,20 +7,20 @@ from lib.phenotype.identify_vacuoles import segment_vacuoles_improved
 # Load aligned phenotype image (always present)
 data_phenotype = imread(snakemake.input[0])
 
-# Load phenotype info with nuclei centroids (always present)
-phenotype_info = pd.read_csv(snakemake.input[-1], sep="\t")
-
 # Determine if cell segmentation is enabled
 segment_cells = snakemake.params.get("segment_cells", True)
 
-# Conditionally load cell and cytoplasm masks
+# Conditionally load cell and cytoplasm masks AND phenotype info
 if segment_cells and len(snakemake.input) >= 4:
     cells = imread(snakemake.input[1])
     cytoplasms = imread(snakemake.input[2])
+    # Load phenotype info with nuclei centroids
+    phenotype_info = pd.read_csv(snakemake.input[3], sep="\t")
     print(f"✓ Cell segmentation enabled: Processing vacuoles with cell association")
 else:
     cells = None
     cytoplasms = None
+    phenotype_info = None  # No phenotype info available
     print(f"✓ Cell segmentation disabled: Processing all vacuoles without cell association")
 
 # Segment vacuoles
@@ -32,7 +32,7 @@ result = segment_vacuoles_improved(
     cytoplasm_masks=cytoplasms,
     vacuole_min_size=snakemake.params.vacuole_min_size,
     vacuole_max_size=snakemake.params.vacuole_max_size,
-    nuclei_centroids=phenotype_info,
+    nuclei_centroids=phenotype_info,  # Can be None
     nuclei_detection=snakemake.params.nuclei_detection,
     nuclei_min_distance=snakemake.params.min_distance_between_maxima,
 )
@@ -42,8 +42,8 @@ if cytoplasms is not None:
     vacuole_masks, cell_vacuole_table, updated_cytoplasm_masks = result
 else:
     vacuole_masks, cell_vacuole_table = result
-    # Create empty cytoplasm masks for consistency
-    updated_cytoplasm_masks = np.zeros_like(vacuole_masks, dtype=np.uint16)
+    # Create empty cytoplasm masks for consistency with the correct shape
+    updated_cytoplasm_masks = np.zeros(data_phenotype.shape[1:], dtype=np.uint16)  # Use image shape
 
 # Save vacuole masks
 imwrite(snakemake.output[0], vacuole_masks)
