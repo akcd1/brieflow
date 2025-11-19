@@ -9,7 +9,6 @@ import pandas as pd
 from lib.shared.file_utils import parse_filename
 
 
-
 def get_alignment_params(wildcards, config: Dict[str, Any]) -> Dict[str, Any]:
     """Get alignment parameters for a specific plate.
 
