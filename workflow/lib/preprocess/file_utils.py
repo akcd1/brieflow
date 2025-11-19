@@ -11,6 +11,7 @@ def get_sample_fps(
     tile: Union[int, str] = None,
     cycle: Union[int, str] = None,
     channel: Union[int, str] = None,
+    folder: Union[int, str] = None,
     round_order: List[Union[int, str]] = None,
     channel_order: List[Union[int, str]] = None,
     verbose: bool = False,
@@ -24,6 +25,7 @@ def get_sample_fps(
         tile (Union[int, str], optional): Tile number to filter by. For well organization, set to None. Defaults to None.
         cycle (Union[int, str], optional): Cycle number to filter by. Defaults to None.
         channel (Union[int, str], optional): Channel to filter by. Defaults to None.
+        folder (Union[int, str], optional): Folder identifier to filter by. Defaults to None.
         round_order (List[Union[int, str]], optional): Order of rounds to return. Defaults to None.
         channel_order (List[Union[int, str]], optional): Order of channels. Defaults to None.
         verbose (bool, optional): Whether to print verbose output. Defaults to False.
@@ -44,6 +46,8 @@ def get_sample_fps(
         filtered_df = filtered_df[filtered_df["cycle"].astype(str) == str(cycle)]
     if channel is not None:
         filtered_df = filtered_df[filtered_df["channel"].astype(str) == str(channel)]
+    if folder is not None and "folder" in filtered_df.columns:
+        filtered_df = filtered_df[filtered_df["folder"].astype(str) == str(folder)]
 
     if round_order is not None:
         # Filter to only include specified rounds
@@ -71,6 +75,10 @@ def get_sample_fps(
             if channel is not None:
                 filtered_df = filtered_df[
                     filtered_df["channel"].astype(str) == str(channel)
+                ]
+            if folder is not None and "folder" in filtered_df.columns:
+                filtered_df = filtered_df[
+                    filtered_df["folder"].astype(str) == str(folder)
                 ]
 
         # Create dictionary mapping round to DataFrame rows
@@ -193,7 +201,7 @@ def get_inputs_for_metadata_extraction(
 
     # Build filter arguments from available wildcards
     filter_args = {}
-    for attr in ["plate", "well", "tile", "cycle", "round"]:
+    for attr in ["plate", "well", "tile", "cycle", "round", "folder"]:
         if hasattr(wildcards, attr):
             filter_args[attr] = getattr(wildcards, attr)
 

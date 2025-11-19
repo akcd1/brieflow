@@ -2,6 +2,7 @@
 
 DEFAULT_METADATA_COLS = [
     "plate",
+    "folder",
     "well",
     "tile",
     "cell_0",

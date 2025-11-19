@@ -64,6 +64,7 @@ def extract_metadata_tile_nd2(
     tile: Union[int, str],
     cycle: Union[int, str] = None,
     round: Union[int, str] = None,
+    folder: Union[int, str] = None,
     verbose: bool = False,
 ) -> pd.DataFrame:
     """Extract metadata from a single ND2 tile file.
@@ -79,6 +80,7 @@ def extract_metadata_tile_nd2(
         tile: Tile/FOV number within the well
         cycle: Optional cycle number for SBS imaging
         round: Optional round number for multiplexed imaging
+        folder: Optional folder identifier
         verbose: Print debug information
 
     Returns:
@@ -124,11 +126,13 @@ def extract_metadata_tile_nd2(
             }
         )
 
-        # Conditionally add cycle and round
+        # Conditionally add cycle, round, and folder
         if cycle is not None:
             metadata["cycle"] = cycle
         if round is not None:
             metadata["round"] = round
+        if folder is not None:
+            metadata["folder"] = folder
 
         # Get pixel size from first channel's volume information
         if frame_meta.channels and hasattr(frame_meta.channels[0], "volume"):
@@ -158,6 +162,7 @@ def extract_metadata_well_nd2(
     well: Union[int, str],
     cycle: Union[int, str] = None,
     round: Union[int, str] = None,
+    folder: Union[int, str] = None,
     verbose: bool = False,
 ) -> pd.DataFrame:
     """Extract metadata from well-based ND2 file containing multiple positions.
@@ -172,6 +177,7 @@ def extract_metadata_well_nd2(
         well: Well identifier (e.g., 'A01', 'B12')
         cycle: Optional cycle number for SBS imaging
         round: Optional round number for multiplexed imaging
+        folder: Optional folder identifier
         verbose: Print debug information
 
     Returns:
@@ -228,11 +234,13 @@ def extract_metadata_well_nd2(
                 }
             )
 
-            # Conditionally add cycle and round
+            # Conditionally add cycle, round, and folder
             if cycle is not None:
                 metadata["cycle"] = cycle
             if round is not None:
                 metadata["round"] = round
+            if folder is not None:
+                metadata["folder"] = folder
 
             # Get pixel calibration if available
             if frame_meta.channels and hasattr(frame_meta.channels[0], "volume"):
@@ -264,6 +272,7 @@ def extract_metadata_tiff(
     tile: Union[int, str],
     cycle: Union[int, str] = None,
     round: Union[int, str] = None,
+    folder: Union[int, str] = None,
     metadata_file_path: str = None,
     verbose: bool = False,
 ) -> pd.DataFrame:
@@ -280,6 +289,7 @@ def extract_metadata_tiff(
         tile: Tile/FOV number
         cycle: Optional cycle number
         round: Optional round number
+        folder: Optional folder identifier
         metadata_file_path: Path to CSV/TSV with position metadata
         verbose: Print debug information
 
@@ -479,11 +489,13 @@ def extract_metadata_tiff(
                     "pixel_size_y": pixel_size_y,
                 }
 
-                # Add cycle and round if provided
+                # Add cycle, round, and folder if provided
                 if cycle is not None:
                     metadata["cycle"] = cycle
                 if round is not None:
                     metadata["round"] = round
+                if folder is not None:
+                    metadata["folder"] = folder
 
                 metadata_rows.append(metadata)
 
@@ -516,11 +528,13 @@ def extract_metadata_tiff(
         "pixel_size_y": None,
     }
 
-    # Add cycle and round if provided
+    # Add cycle, round, and folder if provided
     if cycle is not None:
         metadata["cycle"] = cycle
     if round is not None:
         metadata["round"] = round
+    if folder is not None:
+        metadata["folder"] = folder
 
     return pd.DataFrame([metadata])
 
@@ -796,6 +810,7 @@ def extract_metadata(
     tile: Union[int, str] = None,
     cycle: Union[int, str] = None,
     round: Union[int, str] = None,
+    folder: Union[int, str] = None,
     data_format: str = "nd2",
     data_organization: str = "tile",
     metadata_file_path: str = None,
@@ -813,6 +828,7 @@ def extract_metadata(
         tile: Tile number (required for tile organization, ignored for well)
         cycle: Optional cycle number for SBS imaging
         round: Optional round number for multiplexed imaging
+        folder: Optional folder identifier
         data_format: 'nd2' or 'tiff'
         data_organization: 'tile' (one FOV per file) or 'well' (multiple FOVs per file)
         metadata_file_path: Path to external metadata CSV/TSV (for TIFF)
@@ -862,6 +878,8 @@ def extract_metadata(
                     kwargs["cycle"] = cycle
                 if round is not None:
                     kwargs["round"] = round
+                if folder is not None:
+                    kwargs["folder"] = folder
 
                 df = extract_metadata_tile_nd2(**kwargs)
                 metadata_dfs.append(df)
@@ -880,6 +898,8 @@ def extract_metadata(
                 kwargs["cycle"] = cycle
             if round is not None:
                 kwargs["round"] = round
+            if folder is not None:
+                kwargs["folder"] = folder
 
             return extract_metadata_well_nd2(**kwargs)
 
@@ -903,6 +923,8 @@ def extract_metadata(
                 kwargs["cycle"] = cycle
             if round is not None:
                 kwargs["round"] = round
+            if folder is not None:
+                kwargs["folder"] = folder
 
             df = extract_metadata_tiff(**kwargs)
             metadata_dfs.append(df)

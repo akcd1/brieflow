@@ -38,11 +38,19 @@ def create_metadata_csv_files(
 
     # Define grouping columns based on image type
     if image_type == "phenotype":
-        group_columns = ["plate", "well"]
+        group_columns = ["plate"]
+        # Add folder if present
+        if "folder" in samples_df.columns:
+            group_columns.append("folder")
+        group_columns.append("well")
         if "round" in samples_df.columns:
             group_columns.append("round")
     elif image_type == "sbs":
-        group_columns = ["plate", "well"]
+        group_columns = ["plate"]
+        # Add folder if present
+        if "folder" in samples_df.columns:
+            group_columns.append("folder")
+        group_columns.append("well")
         if "cycle" in samples_df.columns:
             group_columns.append("cycle")
     else:
