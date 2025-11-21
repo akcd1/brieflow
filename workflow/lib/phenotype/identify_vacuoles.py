@@ -270,6 +270,60 @@ def shape_based_declumping(
     return labeled_out
 
 
+def apply_threshold_method(image, method="otsu_two_peak"):
+    """Apply specified thresholding method to an image.
+
+    Parameters
+    ----------
+    image : ndarray
+        Input image (should be preprocessed with log transform and smoothing)
+    method : str
+        Thresholding method to use.
+        Options:
+        - 'otsu_two_peak': Standard Otsu thresholding (2-class)
+        - 'otsu_three_peak_mid_bg': 3-class Otsu, middle class as background
+        - 'otsu_three_peak_mid_fg': 3-class Otsu, middle class as foreground
+        - 'min_cross_entropy': Minimum cross entropy (Li) thresholding
+
+    Returns
+    -------
+    threshold : float
+        Computed threshold value
+    binary_mask : ndarray
+        Binary mask after thresholding
+    """
+    if method == "otsu_two_peak":
+        # Standard two-class Otsu
+        threshold = filters.threshold_otsu(image)
+        binary_mask = image > threshold
+
+    elif method == "otsu_three_peak_mid_bg":
+        # Three-class Otsu, treat middle intensity class as background
+        threshold = filters.threshold_multiotsu(image, classes=3)
+        # Keep only the highest intensity class (threshold[1] separates mid from high)
+        binary_mask = image > threshold[1]
+
+    elif method == "otsu_three_peak_mid_fg":
+        # Three-class Otsu, treat middle intensity class as foreground
+        threshold = filters.threshold_multiotsu(image, classes=3)
+        # Keep both middle and high intensity classes (threshold[0] separates low from mid)
+        binary_mask = image > threshold[0]
+
+    elif method == "min_cross_entropy":
+        # Minimum cross entropy (Li) method
+        threshold = filters.threshold_li(image)
+        binary_mask = image > threshold
+
+    else:
+        raise ValueError(
+            f"Unknown threshold method: {method}. "
+            f"Valid options: 'otsu_two_peak', 'otsu_three_peak_mid_bg', "
+            f"'otsu_three_peak_mid_fg', 'min_cross_entropy'"
+        )
+
+    return threshold, binary_mask
+
+
 def segment_vacuoles_improved(
     image,
     vacuole_channel_index,
@@ -287,6 +341,7 @@ def segment_vacuoles_improved(
     nuclei_centroids=None,
     nuclei_detection=False,
     use_multi_threshold=False,
+    threshold_method="otsu_three_peak_mid_bg",
     use_morphological_opening=False,
     use_enhanced_declumping=True,
     opening_disk_radius=1,
@@ -331,6 +386,11 @@ def segment_vacuoles_improved(
         Whether to detect nuclei within vacuoles
     use_multi_threshold : bool
         Use multiple thresholding methods combined
+    threshold_method : str
+        Thresholding method to use when use_multi_threshold=False.
+        Options: 'otsu_two_peak', 'otsu_three_peak_mid_bg',
+        'otsu_three_peak_mid_fg', 'min_cross_entropy'
+        Default: 'otsu_two_peak'
     use_morphological_opening : bool
         Apply morphological opening to separate connected vacuoles
     use_enhanced_declumping : bool
@@ -364,8 +424,7 @@ def segment_vacuoles_improved(
     else:
         vacuole_log = exposure.adjust_log(vacuole_img + 1)
         vacuole_smooth = filters.gaussian(vacuole_log, sigma=threshold_smoothing_scale)
-        thresh = filters.threshold_otsu(vacuole_smooth)
-        binary_mask = vacuole_smooth > thresh
+        thresh, binary_mask = apply_threshold_method(vacuole_smooth, method=threshold_method)
         binary_mask = ndimage.binary_fill_holes(binary_mask)
 
     if not np.any(binary_mask):
