@@ -143,6 +143,10 @@ def missing_values_filter(
             print(
                 f"Imputing {len(remaining_cols_with_na)} columns with remaining missing values using batched KNN"
             )
+            # KNN imputer returns float64; cast integer columns to float to avoid type errors
+            for col in remaining_cols_with_na:
+                if pd.api.types.is_integer_dtype(features[col]):
+                    features[col] = features[col].astype("float64")
 
             # Identify rows with any NAs in the remaining columns
             has_na_mask = features[remaining_cols_with_na].isna().any(axis=1)

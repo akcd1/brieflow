@@ -30,11 +30,34 @@ np.random.seed(0)
 PCA_SUBSET = 100000
 
 # Load full dataset as logical PyArrow dataset
-cell_dataset = ds.dataset(snakemake.input.filtered_paths, format="parquet")
-print(f"Number of rows across all parquet files: {cell_dataset.count_rows()}")
+# Read all schemas and unify them to handle empty files with null-typed columns
+all_schemas = []
+for path in snakemake.input.filtered_paths:
+    try:
+        table = pq.read_table(path)
+        if len(table) > 0:  # Only use schema from non-empty files
+            all_schemas.append(table.schema)
+    except Exception as e:
+        print(f"Warning: Could not read schema from {path}: {e}")
 
-# Count total rows across all Parquet files
+# Use the first non-empty schema as reference (they should all match if data is consistent)
+if all_schemas:
+    unified_schema = all_schemas[0]
+    cell_dataset = ds.dataset(snakemake.input.filtered_paths, format="parquet", schema=unified_schema)
+else:
+    # Fallback to default behavior if all files are empty
+    print("ERROR: All input files are empty!")
+    cell_dataset = ds.dataset(snakemake.input.filtered_paths, format="parquet")
+
 total_rows = cell_dataset.count_rows()
+print(f"Number of rows across all parquet files: {total_rows}")
+
+# Early exit if dataset is too small
+if total_rows < 10:
+    print(f"WARNING: Only {total_rows} rows found. Skipping alignment and writing empty output.")
+    print("This likely means this cell_class is absent from most/all wells.")
+    pq.write_table(pa.table({}), snakemake.output[0])
+    exit(0)
 
 # Choose random row indices
 n_sample = min(PCA_SUBSET, total_rows)
@@ -48,7 +71,9 @@ sample_df = sample_df.to_pandas(use_threads=True, memory_pool=None)
 # load sample df as pandas dataframe
 use_classifier = snakemake.params.get("use_classifier", False)
 metadata_cols = load_metadata_cols(snakemake.params.metadata_cols_fp, use_classifier)
+sample_df = sample_df.dropna(axis=1)  # drop NaN columns before PCA fitting
 metadata, features = split_cell_data(sample_df, metadata_cols)
+valid_feature_cols = features.columns.tolist()  # capture before prepare_alignment_data converts to numpy
 metadata, features = prepare_alignment_data(
     metadata,
     features,
@@ -82,6 +107,9 @@ for i, indices in enumerate(subset_indices):
         .to_pandas(use_threads=True, memory_pool=None)
         .dropna(axis=1)
     )
+    # Restrict to feature columns used during PCA fitting (plus metadata cols)
+    keep_cols = [c for c in subset_df.columns if c in metadata_cols or c in valid_feature_cols]
+    subset_df = subset_df[keep_cols]
 
     # CALCULATE PERTURBATION SCORE
     subset_df["perturbation_score"] = np.nan

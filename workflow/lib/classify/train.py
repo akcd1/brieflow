@@ -176,7 +176,7 @@ def load_cellprofiler_data(file_paths, class_title=None, metadata_cols=None):
                 c
                 for c in combined_data.columns
                 if c not in ["plate", "well", "tile", "label"]
-                and not c.startswith(("nucleus_", "cell_", "cytoplasm_", "vacuole_"))
+                and not c.startswith(("nucleus_", "cell_", "cytoplasm_", "second_obj_"))
             ]
             raise ValueError(
                 f"CLASS_TITLE '{class_title}' not found in training data.\n"

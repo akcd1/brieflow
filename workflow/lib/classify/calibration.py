@@ -20,7 +20,7 @@ def resolve_join_keys(classify_by: str) -> Tuple[List[str], str]:
 
     Returns (join_keys, id_col) where:
     - For 'cell'/'cells'/'cp': (['label','plate','well','tile'], 'label')
-    - For 'vacuole'/'vacuoles'/'vac': (['vacuole_id','plate','well','tile'], 'vacuole_id')
+    - For 'second_obj'/'second_objs': (['second_obj_id','plate','well','tile'], 'second_obj_id')
     """
     return _resolve_join_keys(classify_by)
 
@@ -56,7 +56,7 @@ def calibrate_confidence(
         master_phenotype_df: DataFrame with all objects and features.
         classified_metadata: DataFrame with predicted classes and confidences.
         manual_labeled_data: DataFrame with manually labeled objects for calibration.
-        classify_by: 'cell' or 'vacuole' (determines join keys).
+        classify_by: 'cell' or 'second_obj' (determines join keys).
         class_title: Column name for predicted class labels (e.g., 'phenotype').
         classifier_path: Path to the trained CellClassifier file.
         confidence_correction: None or 'post-hoc' (currently only 'post-hoc' is supported).
@@ -428,10 +428,10 @@ def _resolve_join_keys(classify_by: str) -> Tuple[List[str], str]:
     ctype = str(classify_by).lower()
     if ctype in {"cell", "cells", "cp"}:
         return ["label", "plate", "well", "tile"], "label"
-    if ctype in {"vacuole", "vacuoles", "vac"}:
-        return ["vacuole_id", "plate", "well", "tile"], "vacuole_id"
+    if ctype in {"second_obj", "second_objs"}:
+        return ["second_obj_id", "plate", "well", "tile"], "second_obj_id"
     raise ValueError(
-        f"Unsupported classify_by value: {classify_by!r}. Use 'cell' or 'vacuole'."
+        f"Unsupported classify_by value: {classify_by!r}. Use 'cell' or 'second_obj'."
     )
 
 

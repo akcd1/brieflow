@@ -279,6 +279,11 @@ def get_montage_inputs(
     # Get actual existing files
     montage_data_files = list(checkpoint_output.glob("*.tsv"))
 
+    # BUG FIX: Return empty list if no montage data files exist
+    # This happens when no cells pass filtering for this cell class
+    if not montage_data_files:
+        return []
+
     # Extract the gene_sgrna parts and make output paths for each channel
     output_files = []
     for montage_data_file in montage_data_files:
@@ -296,11 +301,11 @@ def get_montage_inputs(
             # Append the output file path to the list
             output_files.append(output_file)
 
-    # Add the overlay file path
-    overlay_file = str(montage_overlay_template).format(
-        gene=gene, sgrna=sgrna, cell_class=cell_class
-    )
-    output_files.append(overlay_file)
+        # Add the overlay file path for each gene/sgrna
+        overlay_file = str(montage_overlay_template).format(
+            gene=gene, sgrna=sgrna, cell_class=cell_class
+        )
+        output_files.append(overlay_file)
 
     return output_files
 

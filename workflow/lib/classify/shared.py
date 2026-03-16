@@ -204,7 +204,7 @@ def load_mask_labels(
     *,
     cache: Optional[Dict[Any, Any]] = None,
 ) -> np.ndarray:
-    """Load 2D mask labels image for either 'vacuole' or 'cell' modes."""
+    """Load 2D mask labels image for either 'second_obj' or 'cell' modes."""
     phenotype_output_fp = Path(phenotype_output_fp)
     mode_ = str(mode).lower()
     key = (mode_, int(plate), str(well), int(tile))
@@ -216,30 +216,30 @@ def load_mask_labels(
     m = re.match(r"^([A-Z])(\d{1,2})$", wname)
     wpad = f"{m.group(1)}{int(m.group(2)):02d}" if m else wname
     images_dir = phenotype_output_fp / "images"
-    if mode_ == "vacuole":
+    if mode_ == "second_obj":
         candidates = [
             images_dir
             / get_filename(
                 {"plate": plate, "well": wname, "tile": tile},
-                "identified_vacuoles",
+                "identified_second_objs",
                 "tiff",
             ),
             images_dir
             / get_filename(
                 {"plate": plate, "well": wname, "tile": tile},
-                "identified_vacuoles",
+                "identified_second_objs",
                 "tif",
             ),
             images_dir
             / get_filename(
                 {"plate": plate, "well": wpad, "tile": tile},
-                "identified_vacuoles",
+                "identified_second_objs",
                 "tiff",
             ),
             images_dir
             / get_filename(
                 {"plate": plate, "well": wpad, "tile": tile},
-                "identified_vacuoles",
+                "identified_second_objs",
                 "tif",
             ),
         ]
@@ -284,13 +284,13 @@ def load_parquet(
     cache: Optional[Dict[Any, Any]] = None,
     columns: Optional[List[str]] = None,
 ) -> pd.DataFrame:
-    """Load phenotype parquet for a specific plate/well and mode ('vacuole' or 'cell').
+    """Load phenotype parquet for a specific plate/well and mode ('second_obj' or 'cell').
 
     For cell mode, if 'phenotype_cp.parquet' is missing, will fall back to 'phenotype_cp_min.parquet'.
 
     Args:
         phenotype_output_fp: Path to phenotype output directory containing parquets/.
-        mode: Either 'vacuole' or 'cell' to select parquet type.
+        mode: Either 'second_obj' or 'cell' to select parquet type.
         plate: Plate number.
         well: Well identifier (e.g., 'A1').
         cache: Optional dict to cache loaded dataframes by (mode, plate, well) key.
@@ -307,15 +307,15 @@ def load_parquet(
     wname = well_for_filename(well)
     m = re.match(r"^([A-Z])(\d{1,2})$", wname)
     wpad = f"{m.group(1)}{int(m.group(2)):02d}" if m else wname
-    if mode_ == "vacuole":
+    if mode_ == "second_obj":
         candidates = [
             pq_dir
             / get_filename(
-                {"plate": plate, "well": wname}, "phenotype_vacuoles", "parquet"
+                {"plate": plate, "well": wname}, "phenotype_second_objs", "parquet"
             ),
             pq_dir
             / get_filename(
-                {"plate": plate, "well": wpad}, "phenotype_vacuoles", "parquet"
+                {"plate": plate, "well": wpad}, "phenotype_second_objs", "parquet"
             ),
         ]
     else:
@@ -365,8 +365,8 @@ def get_coords_for_mask(
     mode_ = str(mode).lower()
 
     # Only load the columns we need for coordinate lookup (not entire parquet)
-    if mode_ == "vacuole":
-        coord_cols = ["tile", "vacuole_id", "vacuole_i", "vacuole_j"]
+    if mode_ == "second_obj":
+        coord_cols = ["tile", "second_obj_id", "second_obj_i", "second_obj_j"]
     else:
         # Cell mode: need to try different label column names
         # Load all possible label columns plus coordinates
@@ -378,13 +378,13 @@ def get_coords_for_mask(
         phenotype_output_fp, mode, plate, well, cache=parquet_cache, columns=coord_cols
     )
 
-    if mode_ == "vacuole":
-        sub = df[(df["tile"] == tile) & (df["vacuole_id"] == mask_label)]
+    if mode_ == "second_obj":
+        sub = df[(df["tile"] == tile) & (df["second_obj_id"] == mask_label)]
         if sub.empty:
             raise KeyError(
-                f"No parquet row for vacuole: P-{plate} W-{well_for_filename(well)} T-{tile} vacuole_id={mask_label}"
+                f"No parquet row for second_obj: P-{plate} W-{well_for_filename(well)} T-{tile} second_obj_id={mask_label}"
             )
-        return int(sub.iloc[0]["vacuole_i"]), int(sub.iloc[0]["vacuole_j"])
+        return int(sub.iloc[0]["second_obj_i"]), int(sub.iloc[0]["second_obj_j"])
 
     # Cell/cp mode: support multiple possible label columns
     label_col = None

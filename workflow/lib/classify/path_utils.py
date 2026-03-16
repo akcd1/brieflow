@@ -10,7 +10,7 @@ def get_parquet_config(mode: str, source: str, root_fp: Path) -> Tuple[Path, str
     """Get parquet directory and name suffix based on mode and source.
 
     Args:
-        mode: "cell" or "vacuole"
+        mode: "cell" or "second_obj"
         source: "phenotype" or "merge"
         root_fp: Root file path from config
 
@@ -23,8 +23,8 @@ def get_parquet_config(mode: str, source: str, root_fp: Path) -> Tuple[Path, str
     mode = str(mode).lower()
     source = str(source).lower()
 
-    if mode not in {"cell", "vacuole"}:
-        raise ValueError(f"Invalid mode: {mode}. Must be 'cell' or 'vacuole'.")
+    if mode not in {"cell", "second_obj"}:
+        raise ValueError(f"Invalid mode: {mode}. Must be 'cell' or 'second_obj'.")
 
     if source not in {"phenotype", "merge"}:
         raise ValueError(f"Invalid source: {source}. Must be 'phenotype' or 'merge'.")
@@ -36,8 +36,8 @@ def get_parquet_config(mode: str, source: str, root_fp: Path) -> Tuple[Path, str
         parquet_dir = root_fp / "phenotype" / "parquets"
         if mode == "cell":
             name_suffix = "phenotype_cp"
-        else:  # vacuole
-            name_suffix = "phenotype_vacuoles"
+        else:  # second_obj
+            name_suffix = "phenotype_second_objs"
 
     return parquet_dir, name_suffix
 

@@ -340,7 +340,7 @@ def build_master_phenotype_df(
     Args:
         plates: Plate ID or iterable of IDs (str/int).
         wells: Well ID or iterable of IDs (str/int).
-        mode: Object type to load ("cell" or "vacuole"). Determines the filename suffix automatically.
+        mode: Object type to load ("cell" or "second_obj"). Determines the filename suffix automatically.
         parquet_dir: Directory containing the parquet files.
         read_kwargs: Optional kwargs forwarded to pd.read_parquet (e.g., {"engine": "pyarrow"}).
         verbose: If True, print status messages.
@@ -372,10 +372,10 @@ def build_master_phenotype_df(
             name_suffix = "merge_final.parquet"
         else:
             name_suffix = "phenotype_cp.parquet"
-    elif mode == "vacuole":
-        name_suffix = "phenotype_vacuoles.parquet"
+    elif mode == "second_obj":
+        name_suffix = "phenotype_second_objs.parquet"
     else:
-        raise ValueError(f"Invalid mode: {mode}. Must be 'cell' or 'vacuole'.")
+        raise ValueError(f"Invalid mode: {mode}. Must be 'cell' or 'second_obj'.")
 
     # Normalize inputs to lists of strings
     def _to_list(x):
@@ -846,7 +846,7 @@ def launch_rankline_ui(
     # required data/config
     classified_metadata: pd.DataFrame,
     class_title: str,
-    classify_by: str,  # 'cell'/'cells'/'cp' or 'vacuole'/'vacuoles'/'vac'
+    classify_by: str,  # 'cell'/'cells'/'cp' or 'second_obj'/'second_objs'
     class_mapping: Dict,  # expects {"label_to_class": {id: name, ...}} or {id: name}
     data_source: Union[str, Path],
     images_source: Optional[
@@ -873,7 +873,7 @@ def launch_rankline_ui(
     Args:
         classified_metadata: DataFrame containing classified objects with predictions.
         class_title: Title/name of the classification task (e.g., "Cell Class").
-        classify_by: Type of object being classified ('cell'/'cells'/'cp' or 'vacuole'/'vacuoles'/'vac').
+        classify_by: Type of object being classified ('cell'/'cells'/'cp' or 'second_obj'/'second_objs').
         class_mapping: Dictionary mapping class IDs to names. Either {"label_to_class": {id: name, ...}} or {id: name}.
         data_source: Path to data source directory (for parquets).
         images_source: Path to directory containing images/ subdirectory. If None, defaults to data_source.
@@ -928,8 +928,8 @@ def launch_rankline_ui(
     # Mode & ID column
     mode = str(classify_by).lower()
     is_merge = "merge" in str(data_source).lower()
-    if mode == "vacuole":
-        id_col = "vacuole_id"
+    if mode == "second_obj":
+        id_col = "second_obj_id"
     else:
         if is_merge and "cell_0" in classified_metadata.columns:
             id_col = "cell_0"  # phenotype cell ID in merge parquets

@@ -187,7 +187,7 @@ def consolidate_manual_classifications(
     Args:
         manual_classified_df: Table with at least ['plate','well','tile','mask_label', class_title].
         class_title: Name of the classification column to write.
-        mode: 'cell' or 'vacuole'.
+        mode: 'cell' or 'second_obj'.
         data_source: Root data source path containing 'parquets'.
         classifier_output_dir: Root path where 'training_dataset' is created.
         timestamp: Optional timestamp string used in output filename.
@@ -239,13 +239,13 @@ def consolidate_manual_classifications(
         plate_int = int(plate_val)
         well_str = str(well_val)
 
-        if mode == "vacuole":
+        if mode == "second_obj":
             pq_path = parquet_dir / get_filename(
                 {"plate": plate_int, "well": well_for_filename(well_str)},
-                "phenotype_vacuoles",
+                "phenotype_second_objs",
                 "parquet",
             )
-            id_col = "vacuole_id"
+            id_col = "second_obj_id"
         else:
             # Determine if this is a merge data source
             is_merge = "merge" in str(parquet_dir).lower()
@@ -381,7 +381,7 @@ def prepare_mask_dataframes(
     """Build mask summary and key tables from per-well parquets and (optionally) apply thresholds.
 
     Args:
-        mode: 'vacuole' or 'cell'.
+        mode: 'second_obj' or 'cell'.
         data_source: Root output path (contains 'parquets' subdirectory).
         plates: Iterable of plate identifiers to include.
         wells: Iterable of well identifiers to include.
@@ -675,7 +675,7 @@ def load_existing_training_data(
 
     Args:
         existing_training_path: Path to existing training parquet.
-        mode: Classification mode ('cell' or 'vacuole').
+        mode: Classification mode ('cell' or 'second_obj').
         class_title: Name of the classification column.
 
     Returns:
@@ -749,7 +749,7 @@ def initialize_labeling_state(
 
     Args:
         random_seed: Random seed for reproducibility.
-        mode: Classification mode ('cell' or 'vacuole').
+        mode: Classification mode ('cell' or 'second_obj').
         class_title: Name of the classification column.
         keys: Key column names (e.g., ['plate','well','tile','mask_label']).
         existing_classified_df: Optional existing classified dataframe.
@@ -853,16 +853,16 @@ def _id_col_for_mode(columns, mode: str) -> str:
 
     Args:
         columns: Iterable of column names present in the parquet.
-        mode: Normalized mode ('vacuole' or 'cell').
+        mode: Normalized mode ('second_obj' or 'cell').
 
     Returns:
-        The ID column name to use ('vacuole_id' | 'label' | 'labels' | 'cell_0').
+        The ID column name to use ('second_obj_id' | 'label' | 'labels' | 'cell_0').
     """
     cols = set(columns)
-    if mode == "vacuole":
-        if "vacuole_id" in cols:
-            return "vacuole_id"
-        raise ValueError("Parquet is missing 'vacuole_id' for vacuole mode.")
+    if mode == "second_obj":
+        if "second_obj_id" in cols:
+            return "second_obj_id"
+        raise ValueError("Parquet is missing 'second_obj_id' for second_obj mode.")
     # For cell mode: check phenotype parquet columns first ('label'/'labels'),
     # then merge parquet column ('cell_0' = phenotype cell ID, tile-based)
     for c in ("label", "labels", "cell_0"):
@@ -878,7 +878,7 @@ def _pq_path_for(plate, well, data_source: Path, mode: str) -> Path:
         plate: Plate identifier.
         well: Well identifier.
         data_source: Output directory (phenotype or merge; parquets subdirectory is appended).
-        mode: 'cell' or 'vacuole'.
+        mode: 'cell' or 'second_obj'.
 
     Returns:
         The resolved parquet file path. For cell mode with phenotype source,
@@ -890,9 +890,9 @@ def _pq_path_for(plate, well, data_source: Path, mode: str) -> Path:
     # Determine if this is a merge data source
     is_merge = "merge" in str(data_source).lower()
 
-    if mode == "vacuole":
+    if mode == "second_obj":
         return pq_dir / get_filename(
-            {"plate": plate, "well": wnorm}, "phenotype_vacuoles", "parquet"
+            {"plate": plate, "well": wnorm}, "phenotype_second_objs", "parquet"
         )
 
     # cell mode
@@ -1039,7 +1039,7 @@ def _load_feature_index(
 
     Args:
         in_gate_df_all: Pool with key columns ['plate','well','tile','mask_label'].
-        mode: Normalized mode ('vacuole' or 'cell').
+        mode: Normalized mode ('second_obj' or 'cell').
         pq_dir: Directory containing phenotype parquets.
         feature: Column to load as the feature.
 
@@ -1056,9 +1056,9 @@ def _load_feature_index(
         in_gate_df_all[["plate", "well"]].drop_duplicates().itertuples(index=False)
     ):
         wnorm = well_for_filename(well)
-        if mode == "vacuole":
+        if mode == "second_obj":
             pq_path = pq_dir / get_filename(
-                {"plate": plate, "well": wnorm}, "phenotype_vacuoles", "parquet"
+                {"plate": plate, "well": wnorm}, "phenotype_second_objs", "parquet"
             )
         elif is_merge:
             pq_path = pq_dir / get_filename(
@@ -1135,7 +1135,7 @@ def _apply_multi_thresholds(
 
     Args:
         in_gate_df_all: Full pool of mask keys.
-        mode: Normalized mode ('vacuole' or 'cell').
+        mode: Normalized mode ('second_obj' or 'cell').
         pq_dir: Directory containing phenotype parquets.
         specs: List of filter dicts with keys: feature, min_num, max_num, min_pct, max_pct.
         keys: Key column names (e.g., ['plate','well','tile','mask_label']).
@@ -1264,7 +1264,7 @@ def _normalize_keys(df: pd.DataFrame, mode: str, class_col: str) -> pd.DataFrame
 
     Args:
         df: Input DataFrame containing plate/well/tile, the ID column, and class_col.
-        mode: Normalized mode ('vacuole' or 'cell').
+        mode: Normalized mode ('second_obj' or 'cell').
         class_col: Name of the classification column.
 
     Returns:
@@ -1347,7 +1347,7 @@ def _render_row(
     Args:
         meta: Row metadata containing keys and optional flags.
         state: Mutable cache/state dict.
-        mode: Normalized mode ('vacuole' or 'cell').
+        mode: Normalized mode ('second_obj' or 'cell').
         images_source: Path to directory containing images/ subdirectory.
         channel_names: Channel names (for shape validation).
         channel_indices: Indices of channels to display.
@@ -1596,7 +1596,7 @@ def _render_next_batch(
         classifier_output_dir: Classifier output directory (for checkpoint storage).
         images_source: Path to directory containing images/ subdirectory. If None, defaults to data_source.
         channel_names: Channel names (for aligned stack validation).
-        mode: Normalized mode ('vacuole' or 'cell').
+        mode: Normalized mode ('second_obj' or 'cell').
         resolved_colors: List of ('gray' or label, (r,g,b)) tuples per channel.
         scale_bar: Scale bar size in pixels (0 disables).
         existing_keys: Keys present in existing training dataset (for relabeling priority).
@@ -1789,7 +1789,7 @@ def _render_next_batch(
         df_unc = pd.DataFrame()
 
     total_classified = len(df_cls)
-    unit = "cells" if mode == "cell" else "vacuoles"
+    unit = "cells" if mode == "cell" else "second_objs"
 
     lines = [f"Displaying: {len(row_widgets)}"]
     if add_training_data:

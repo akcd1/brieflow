@@ -10,6 +10,12 @@ cell_data = ds.dataset(snakemake.input[0], format="parquet")
 cell_data = cell_data.to_table(use_threads=True, memory_pool=None).to_pandas()
 print(f"Shape of input data: {cell_data.shape}")
 
+# Early exit if input is empty (e.g. cell_class absent from all wells)
+if len(cell_data) == 0:
+    print("WARNING: Input aligned parquet is empty. Writing empty output and skipping.")
+    open(snakemake.output[0], "w").close()
+    exit(0)
+
 # Split aligned data into features and metadata
 use_classifier = snakemake.params.get("use_classifier", False)
 metadata_cols = load_metadata_cols(

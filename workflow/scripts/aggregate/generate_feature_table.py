@@ -18,9 +18,31 @@ pert_id_col = snakemake.params.perturbation_id_col
 control_key = snakemake.params.control_key
 num_batches = snakemake.params.get("num_align_batches", 1)
 
+# BUG FIX: When pert_id_col is None, use pert_col as the construct identifier
+# This allows the script to work when users don't need separate construct IDs
+construct_id_col = pert_id_col if pert_id_col is not None else pert_col
+
 # Load cell data using PyArrow dataset (lazy - no data loaded yet)
 print("Loading cell data as PyArrow dataset...")
-cell_dataset = ds.dataset(snakemake.input.filtered_paths, format="parquet")
+
+# Read all schemas and unify them to handle empty files with null-typed columns
+all_schemas = []
+for path in snakemake.input.filtered_paths:
+    try:
+        table = pq.read_table(path)
+        if len(table) > 0:  # Only use schema from non-empty files
+            all_schemas.append(table.schema)
+    except Exception as e:
+        print(f"Warning: Could not read schema from {path}: {e}")
+
+# Use the first non-empty schema as reference (they should all match if data is consistent)
+if all_schemas:
+    unified_schema = all_schemas[0]
+    cell_dataset = ds.dataset(snakemake.input.filtered_paths, format="parquet", schema=unified_schema)
+else:
+    # Fallback to default behavior if all files are empty
+    print("WARNING: All input files are empty!")
+    cell_dataset = ds.dataset(snakemake.input.filtered_paths, format="parquet")
 
 # Determine columns
 cell_data_cols = cell_dataset.schema.names
@@ -38,6 +60,34 @@ print(
 # Count total rows
 total_rows = cell_dataset.count_rows()
 print(f"Total rows across all parquet files: {total_rows}")
+
+# BUG FIX: Handle empty datasets gracefully
+if total_rows == 0:
+    print("\nWARNING: Dataset is empty (0 rows). Creating empty output tables.")
+
+    # Create empty parquet file with correct schema
+    empty_df = pd.DataFrame(columns=existing_metadata_cols + feature_cols)
+    empty_table = pa.Table.from_pandas(empty_df, preserve_index=False)
+    pq.write_table(empty_table, snakemake.output[0])
+
+    # Create empty construct table
+    if pert_id_col is not None:
+        construct_cols = [pert_id_col, pert_col, "cell_count"] + feature_cols
+    else:
+        construct_cols = [pert_col, "cell_count"] + feature_cols
+    empty_construct = pd.DataFrame(columns=construct_cols)
+    empty_construct.to_csv(snakemake.output[1], sep="\t", index=False)
+
+    # Create empty gene table
+    gene_cols = [pert_col, "cell_count"] + feature_cols
+    empty_gene = pd.DataFrame(columns=gene_cols)
+    empty_gene.to_csv(snakemake.output[2], sep="\t", index=False)
+
+    print(f"Created empty output files:")
+    print(f"  - {snakemake.output[0]}")
+    print(f"  - {snakemake.output[1]}")
+    print(f"  - {snakemake.output[2]}")
+    exit(0)
 
 # Create random indices for batched processing (like align.py)
 np.random.seed(0)
@@ -74,8 +124,15 @@ for batch_idx, indices in enumerate(subset_indices):
         cell_dataset.scanner(columns=existing_metadata_cols + feature_cols)
         .take(pa.array(indices_sorted))
         .to_pandas(use_threads=True)
+        .dropna(axis=1)  # Drop all-null columns to prevent casting errors
     )
     print(f"Loaded batch shape: {batch_df.shape}")
+
+    # Update feature_cols in first batch to reflect actual available columns after dropna
+    # This ensures we don't include all-null columns in aggregation
+    if batch_idx == 0:
+        feature_cols = [col for col in batch_df.columns if col not in existing_metadata_cols]
+        print(f"Updated feature columns after removing all-null columns: {len(feature_cols)} features")
 
     # Convert numerical columns to float32
     for col in batch_df.columns:
@@ -126,8 +183,8 @@ for batch_idx, indices in enumerate(subset_indices):
 
     # Accumulate construct-level data for median computation
     print(f"Accumulating construct statistics for batch {batch_idx + 1}...")
-    for construct_id in metadata[pert_id_col].unique():
-        mask = metadata[pert_id_col].values == construct_id
+    for construct_id in metadata[construct_id_col].unique():
+        mask = metadata[construct_id_col].values == construct_id
         construct_features = features[mask]
         gene_name = metadata.loc[mask, pert_col].iloc[0]
 
@@ -158,11 +215,19 @@ for construct_id in construct_cell_counts.keys():
     # Compute median across all cells
     median_features = np.median(all_features, axis=0)
 
-    row = {
-        pert_id_col: construct_id,
-        pert_col: construct_gene_map[construct_id],
-        "cell_count": construct_cell_counts[construct_id],
-    }
+    # BUG FIX: Conditionally include pert_id_col in output if it exists
+    if pert_id_col is not None:
+        row = {
+            pert_id_col: construct_id,
+            pert_col: construct_gene_map[construct_id],
+            "cell_count": construct_cell_counts[construct_id],
+        }
+    else:
+        # When pert_id_col is None, construct_id is the same as gene name
+        row = {
+            pert_col: construct_id,
+            "cell_count": construct_cell_counts[construct_id],
+        }
     for i, col in enumerate(feature_cols):
         row[col] = median_features[i]
     construct_rows.append(row)
@@ -173,8 +238,11 @@ gc.collect()
 
 construct_table = pd.DataFrame(construct_rows)
 
-# Reorder columns: sgRNA, gene, cell_count, features
-construct_columns = [pert_id_col, pert_col, "cell_count"] + feature_cols
+# Reorder columns: sgRNA, gene, cell_count, features (or just gene, cell_count, features if no pert_id_col)
+if pert_id_col is not None:
+    construct_columns = [pert_id_col, pert_col, "cell_count"] + feature_cols
+else:
+    construct_columns = [pert_col, "cell_count"] + feature_cols
 construct_table = construct_table[construct_columns]
 
 print(f"Construct table shape: {construct_table.shape}")
@@ -242,10 +310,11 @@ if pseudogene_patterns:
         print(f"  Creating gene table entry for: {pseudogene_id}")
 
         # Get construct IDs from this pseudo-gene group
-        construct_ids_in_group = [c[pert_id_col] for c in constructs]
+        # BUG FIX: Use construct_id_col instead of pert_id_col
+        construct_ids_in_group = [c[construct_id_col] for c in constructs]
 
         # Find matching rows in construct_table
-        group_mask = construct_table[pert_id_col].isin(construct_ids_in_group)
+        group_mask = construct_table[construct_id_col].isin(construct_ids_in_group)
         group_constructs = construct_table[group_mask]
 
         if len(group_constructs) == 0:
@@ -293,10 +362,11 @@ if pseudogene_patterns:
     for pseudogene_group in pseudogene_groups:
         pseudogene_id = pseudogene_group["pseudogene_id"]
         for construct in pseudogene_group["constructs"]:
-            construct_id = construct[pert_id_col]
+            # BUG FIX: Use construct_id_col instead of pert_id_col
+            construct_id = construct[construct_id_col]
 
             # Find the original construct in construct_table
-            construct_mask = construct_table[pert_id_col] == construct_id
+            construct_mask = construct_table[construct_id_col] == construct_id
             original_construct = construct_table[construct_mask]
 
             if len(original_construct) > 0:
@@ -309,7 +379,7 @@ if pseudogene_patterns:
     if pseudogene_construct_rows:
         # Remove original constructs that are now part of pseudo-genes
         construct_table = construct_table[
-            ~construct_table[pert_id_col].isin(original_construct_ids_to_remove)
+            ~construct_table[construct_id_col].isin(original_construct_ids_to_remove)
         ]
 
         # Add pseudo-gene constructs
