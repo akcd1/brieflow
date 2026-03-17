@@ -26,6 +26,7 @@ def perturbation_score(
     control_key: str,
     minimum_cell_count: int = 100,
     n_jobs: int = -1,
+    control_col: str | None = None,
 ) -> None:
     """Process all perturbations and assign perturbation scores to cells based on AUC threshold.
 
@@ -40,16 +41,14 @@ def perturbation_score(
         control_key (str): Prefix identifying control perturbations (e.g., 'nontargeting').
         minimum_cell_count (int, optional): Minimum number of cells required to process a perturbation. Defaults to 100.
         n_jobs (int, optional): Number of parallel jobs. -1 uses all available CPUs. Defaults to -1.
+        control_col (str, optional): Column to use for identifying control cells via control_key.
+            Defaults to perturbation_name_col.
     """
+    _ctrl_col = control_col or perturbation_name_col
+    ctrl_mask = cell_data[_ctrl_col].astype(str).str.startswith(control_key)
     perturbation_col = cell_data[perturbation_name_col]
-    perturbed_genes = [
-        gene
-        for gene in perturbation_col.unique().tolist()
-        if not gene.startswith(control_key)
-    ]
-    nt_idx = perturbation_col.index[
-        perturbation_col.str.startswith(control_key)
-    ].to_numpy()
+    perturbed_genes = cell_data.loc[~ctrl_mask, perturbation_name_col].unique().tolist()
+    nt_idx = cell_data.index[ctrl_mask].to_numpy()
 
     print(f"Processing {len(perturbed_genes)} genes with {n_jobs} parallel jobs...")
 

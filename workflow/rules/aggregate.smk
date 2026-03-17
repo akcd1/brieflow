@@ -34,7 +34,10 @@ rule filter:
     params:
         metadata_cols_fp=config["aggregate"]["metadata_cols_fp"],
         use_classifier=config.get("classify", {}).get("classifier_path") is not None,
-        filter_queries=config["aggregate"]["filter_queries"],
+        filter_queries=lambda wildcards: (
+            config["aggregate"]["filter_queries"] +
+            config["aggregate"].get("filter_queries_by_class", {}).get(wildcards.cell_class, [])
+        ),
         perturbation_name_col=config["aggregate"]["perturbation_name_col"],
         drop_cols_threshold=config["aggregate"]["drop_cols_threshold"],
         drop_rows_threshold=config["aggregate"]["drop_rows_threshold"],
@@ -93,6 +96,7 @@ rule align:
         batch_cols=config["aggregate"]["batch_cols"],
         variance_or_ncomp=config["aggregate"]["variance_or_ncomp"],
         control_key=config["aggregate"]["control_key"],
+        control_name_col=config["aggregate"].get("control_name_col"),
         num_align_batches=config["aggregate"]["num_align_batches"],
         skip_perturbation_score=config["aggregate"]["skip_perturbation_score"],
     script:
@@ -183,6 +187,7 @@ rule generate_montage:
         ],
     params:
         channels=config["phenotype"]["channel_names"],
+        cell_size=config["aggregate"]["montage_cell_size"],
     script:
         "../scripts/aggregate/generate_montage.py"
 

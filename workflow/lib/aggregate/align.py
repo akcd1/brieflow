@@ -141,6 +141,7 @@ def tvn_on_controls(
     pert_col: str,
     control_key: str,
     batch_col: str | None = None,
+    control_col: str | None = None,
 ) -> np.ndarray:
     """Apply TVN (Typical Variation Normalization) to the data based on the control perturbation units.
 
@@ -153,15 +154,20 @@ def tvn_on_controls(
         control_key (str): The control perturbation label.
         batch_col (str, optional): Column name in the metadata DataFrame representing the batch labels
             to be used for CORAL normalization. Defaults to None.
+        control_col (str, optional): Column to use for identifying control cells via control_key.
+            Defaults to pert_col. Use when aggregating by a different column than the one that
+            contains the control identifier (e.g. pert_col="cell_barcode_0" but controls are
+            identified via gene_symbol_0).
 
     Returns:
         np.ndarray: The normalized embeddings.
     """
-    embeddings = centerscale_on_controls(embeddings, metadata, pert_col, control_key)
-    ctrl_ind = metadata[pert_col].str.startswith(control_key).to_list()
+    _ctrl_col = control_col or pert_col
+    embeddings = centerscale_on_controls(embeddings, metadata, pert_col, control_key, control_col=_ctrl_col)
+    ctrl_ind = metadata[_ctrl_col].str.startswith(control_key).to_list()
     embeddings = PCA().fit(embeddings[ctrl_ind]).transform(embeddings)
     embeddings = centerscale_on_controls(
-        embeddings, metadata, pert_col, control_key, batch_col
+        embeddings, metadata, pert_col, control_key, batch_col, control_col=_ctrl_col
     )
     target_cov = np.cov(embeddings[ctrl_ind], rowvar=False, ddof=1) + 0.5 * np.eye(
         embeddings.shape[1]
@@ -171,7 +177,7 @@ def tvn_on_controls(
         for batch in batches:
             batch_ind = metadata[batch_col] == batch
             batch_control_ind = (
-                batch_ind & (metadata[pert_col].str.startswith(control_key)).to_list()
+                batch_ind & (metadata[_ctrl_col].str.startswith(control_key)).to_list()
             )
             source_cov = np.cov(
                 embeddings[batch_control_ind], rowvar=False, ddof=1
@@ -235,6 +241,7 @@ def centerscale_on_controls(
     control_key: str,
     batch_col: str | None = None,
     method: str = "standard",
+    control_col: str | None = None,
 ) -> np.ndarray:
     """Center and scale the embeddings on the control perturbation units in the metadata.
 
@@ -249,12 +256,16 @@ def centerscale_on_controls(
             Defaults to None.
         method (str, optional): Scaling method to use. Options are "standard" (mean/std)
             or "mad" (median/MAD). Defaults to "standard".
+        control_col (str, optional): Column to use for identifying control cells via control_key.
+            Defaults to pert_col.
 
     Returns:
         numpy.ndarray: The aligned embeddings.
     """
     if method not in ["standard", "mad"]:
         raise ValueError(f"Unknown scaling method: {method}. Use 'standard' or 'mad'.")
+
+    _ctrl_col = control_col or pert_col
 
     # helper for MAD scaling (robust z-score, consistent with std under normality)
     def _mad_scale(X: np.ndarray, ref: np.ndarray) -> np.ndarray:
@@ -264,7 +275,7 @@ def centerscale_on_controls(
         return 0.6745 * (X - med) / mad_safe
 
     # boolean mask for "control" rows uses startswith on stringified column, handles NaNs
-    ctrl_mask_all = metadata[pert_col].astype(str).str.startswith(control_key)
+    ctrl_mask_all = metadata[_ctrl_col].astype(str).str.startswith(control_key)
 
     if batch_col is not None:
         for batch in metadata[batch_col].unique():
