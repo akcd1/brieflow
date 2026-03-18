@@ -71,7 +71,7 @@ if total_rows == 0:
     pq.write_table(empty_table, snakemake.output[0])
 
     # Create empty construct table
-    if pert_id_col is not None:
+    if pert_id_col is not None and pert_id_col != pert_col:
         construct_cols = [pert_id_col, pert_col, "cell_count"] + feature_cols
     else:
         construct_cols = [pert_col, "cell_count"] + feature_cols
@@ -239,10 +239,12 @@ gc.collect()
 construct_table = pd.DataFrame(construct_rows)
 
 # Reorder columns: sgRNA, gene, cell_count, features (or just gene, cell_count, features if no pert_id_col)
-if pert_id_col is not None:
-    construct_columns = [pert_id_col, pert_col, "cell_count"] + feature_cols
+# Exclude pert_col/pert_id_col from feature portion to prevent duplicate columns
+feature_cols_for_table = [c for c in feature_cols if c not in (pert_col, pert_id_col, "cell_count")]
+if pert_id_col is not None and pert_id_col != pert_col:
+    construct_columns = [pert_id_col, pert_col, "cell_count"] + feature_cols_for_table
 else:
-    construct_columns = [pert_col, "cell_count"] + feature_cols
+    construct_columns = [pert_col, "cell_count"] + feature_cols_for_table
 construct_table = construct_table[construct_columns]
 
 print(f"Construct table shape: {construct_table.shape}")
@@ -282,7 +284,7 @@ control_gene_table = control_constructs[[pert_col, "cell_count"] + feature_cols]
 final_gene_table = pd.concat([gene_table, control_gene_table], ignore_index=True)
 
 # Reorder columns: gene, cell_count, features
-gene_columns = [pert_col, "cell_count"] + feature_cols
+gene_columns = [pert_col, "cell_count"] + feature_cols_for_table
 final_gene_table = final_gene_table[gene_columns]
 
 print(f"Gene table shape: {final_gene_table.shape}")

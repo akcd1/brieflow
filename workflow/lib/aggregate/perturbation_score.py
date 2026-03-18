@@ -149,6 +149,11 @@ def calculate_perturbation_scores(
         return pd.Series(np.nan, index=cell_data.index), np.nan
 
     y = (cell_data[perturbation_col] == gene).astype(int).to_numpy()
+
+    # if only one class present after preprocessing, skip
+    if len(np.unique(y)) < 2:
+        print(f"!! Skipping {gene}: only one class in data after preprocessing")
+        return pd.Series(np.nan, index=cell_data.index), np.nan
     X_all = cell_data[feature_cols].to_numpy()
 
     # select top-k differential features (ANOVA F-test)
@@ -162,7 +167,7 @@ def calculate_perturbation_scores(
     else:
         n_splits = 10
 
-    clf = LogisticRegression(max_iter=2000, class_weight="balanced", solver="liblinear")
+    clf = LogisticRegression(max_iter=2000, class_weight="balanced", solver="lbfgs")
     cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
     scores = cross_val_predict(clf, X, y, cv=cv, method="predict_proba")[:, 1]
 
