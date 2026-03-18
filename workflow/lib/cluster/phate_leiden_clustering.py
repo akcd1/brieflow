@@ -304,30 +304,31 @@ def plot_phate_leiden_clusters(
 
 
 def calculate_potential_to_nontargeting(
-    potential_df, control_key, distance_metric="euclidean", normalize=True
+    potential_df, control_key, perturbation_name_col="gene_symbol_0", distance_metric="euclidean", normalize=True
 ):
     """Calculate the average distance from each row to nontargeting controls.
 
     Args:
-        potential_df (pd.DataFrame): DataFrame with gene_symbol_0 and potential columns
+        potential_df (pd.DataFrame): DataFrame with perturbation_name_col and potential columns
         control_key (str): String pattern used to identify control rows
+        perturbation_name_col (str): Column name containing perturbation identifiers. Defaults to "gene_symbol_0".
         distance_metric (str): Distance metric to use (default: 'euclidean')
         normalize (bool): Whether to min-max normalize the distances (default: True)
 
     Returns:
-        pd.DataFrame: DataFrame with gene_symbol_0, mean_potential_to_nontargeting,
+        pd.DataFrame: DataFrame with perturbation_name_col, mean_potential_to_nontargeting,
                       and normalized_potential_to_nontargeting (if normalize=True)
     """
     import numpy as np
     from scipy.spatial.distance import pdist, squareform
 
-    # Extract potential columns (all columns except gene_symbol_0)
+    # Extract potential columns (all columns except perturbation_name_col)
     potential_cols = [
         col for col in potential_df.columns if col.startswith("potential_")
     ]
 
     # Identify nontargeting control rows
-    nontargeting_mask = potential_df["gene_symbol_0"].str.contains(
+    nontargeting_mask = potential_df[perturbation_name_col].str.contains(
         control_key, na=False
     )
     nontargeting_indices = potential_df.index[nontargeting_mask].tolist()
@@ -346,7 +347,7 @@ def calculate_potential_to_nontargeting(
     # For each row, calculate average distance to nontargeting controls
     average_distance = []
     for idx in potential_df.index:
-        gene_symbol = potential_df.loc[idx, "gene_symbol_0"]
+        gene_symbol = potential_df.loc[idx, perturbation_name_col]
 
         # Get distances from this row to all nontargeting controls
         distances_to_nontargeting = [
@@ -358,7 +359,7 @@ def calculate_potential_to_nontargeting(
 
         average_distance.append(
             {
-                "gene_symbol_0": gene_symbol,
+                perturbation_name_col: gene_symbol,
                 "mean_potential_to_nontargeting": avg_distance,
             }
         )
