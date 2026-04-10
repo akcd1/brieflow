@@ -264,6 +264,7 @@ rule final_merge:
     input:
         MERGE_OUTPUTS["deduplicate_merge"][1],
         ancient(PHENOTYPE_OUTPUTS["merge_phenotype_cp"][0]),
+        ancient(PHENOTYPE_OUTPUTS["combine_phenotype_info"]),
     output:
         MERGE_OUTPUTS_MAPPED["final_merge"][0],
     params:

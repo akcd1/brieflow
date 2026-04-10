@@ -964,7 +964,9 @@ def apply_all_filters(data):
     data = apply_filter(data, "channel_combo", selected_channel_combo)
 
     # Cell Class filter - handle directly
-    cell_class_options = ["all", "Mitotic", "Interphase"]
+    cell_class_options = sorted(data["cell_class"].unique().tolist())
+    if "all" in cell_class_options:
+        cell_class_options = ["all"] + [c for c in cell_class_options if c != "all"]
     # Initialize cell class in session state if needed
     if "cell_class" not in st.session_state:
         st.session_state.cell_class = "all"
@@ -977,7 +979,9 @@ def apply_all_filters(data):
     selected_cell_class = st.sidebar.radio(
         "**Cell Class** - *Used to subset single cell data with classifier provided during aggregation*",
         cell_class_options,
-        index=cell_class_options.index(st.session_state.cell_class),
+        index=cell_class_options.index(st.session_state.cell_class)
+        if st.session_state.cell_class in cell_class_options
+        else 0,
         key="cell_class_radio_main",
         on_change=on_cell_class_change,
         format_func=format_cell_class,

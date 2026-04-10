@@ -1,41 +1,42 @@
-from lib.shared.target_utils import output_to_input
+from lib.shared.target_utils import output_to_input, outputs_to_targets
 from lib.shared.rule_utils import get_alignment_params, get_segmentation_params
 
 
+# [DOWNSTREAM-ONLY MODE] Upstream rules commented out — outputs on disk act as source files.
 # Apply illumination correction field
-rule apply_ic_field_phenotype:
-    input:
-        ancient(PREPROCESS_OUTPUTS["convert_phenotype"]),
-        ancient(PREPROCESS_OUTPUTS["calculate_ic_phenotype"]),
-    output:
-        PHENOTYPE_OUTPUTS_MAPPED["apply_ic_field_phenotype"],
-    script:
-        "../scripts/phenotype/apply_ic_field_phenotype.py"
+# rule apply_ic_field_phenotype:
+#     input:
+#         ancient(PREPROCESS_OUTPUTS["convert_phenotype"]),
+#         ancient(PREPROCESS_OUTPUTS["calculate_ic_phenotype"]),
+#     output:
+#         PHENOTYPE_OUTPUTS_MAPPED["apply_ic_field_phenotype"],
+#     script:
+#         "../scripts/phenotype/apply_ic_field_phenotype.py"
 
 
 # Align phenotype images
-rule align_phenotype:
-    input:
-        PHENOTYPE_OUTPUTS["apply_ic_field_phenotype"],
-    output:
-        PHENOTYPE_OUTPUTS_MAPPED["align_phenotype"][0],  # aligned image
-        PHENOTYPE_OUTPUTS_MAPPED["align_phenotype"][1],  # alignment metrics TSV
-    params:
-        config=lambda wildcards: get_alignment_params(wildcards, config),
-    script:
-        "../scripts/phenotype/align_phenotype.py"
+# rule align_phenotype:
+#     input:
+#         PHENOTYPE_OUTPUTS["apply_ic_field_phenotype"],
+#     output:
+#         PHENOTYPE_OUTPUTS_MAPPED["align_phenotype"][0],  # aligned image
+#         PHENOTYPE_OUTPUTS_MAPPED["align_phenotype"][1],  # alignment metrics TSV
+#     params:
+#         config=lambda wildcards: get_alignment_params(wildcards, config),
+#     script:
+#         "../scripts/phenotype/align_phenotype.py"
 
 
 # Segments cells and nuclei using pre-defined methods
-rule segment_phenotype:
-    input:
-        PHENOTYPE_OUTPUTS["align_phenotype"][0],
-    output:
-        PHENOTYPE_OUTPUTS_MAPPED["segment_phenotype"],
-    params:
-        config=lambda wildcards: get_segmentation_params("phenotype", config),
-    script:
-        "../scripts/shared/segment.py"
+# rule segment_phenotype:
+#     input:
+#         PHENOTYPE_OUTPUTS["align_phenotype"][0],
+#     output:
+#         PHENOTYPE_OUTPUTS_MAPPED["segment_phenotype"],
+#     params:
+#         config=lambda wildcards: get_segmentation_params("phenotype", config),
+#     script:
+#         "../scripts/shared/segment.py"
 
 
 # Extract cytoplasmic masks from segmented nuclei, cells
@@ -67,18 +68,18 @@ rule extract_phenotype_info:
 
 
 # Combine phenotype info results from different tiles
-rule combine_phenotype_info:
-    input:
-        lambda wildcards: output_to_input(
-            PHENOTYPE_OUTPUTS["extract_phenotype_info"],
-            wildcards=wildcards,
-            expansion_values=["tile"],
-            metadata_combos=phenotype_wildcard_combos,
-        ),
-    output:
-        PHENOTYPE_OUTPUTS_MAPPED["combine_phenotype_info"],
-    script:
-        "../scripts/shared/combine_dfs.py"
+# rule combine_phenotype_info:
+#     input:
+#         lambda wildcards: output_to_input(
+#             PHENOTYPE_OUTPUTS["extract_phenotype_info"],
+#             wildcards=wildcards,
+#             expansion_values=["tile"],
+#             metadata_combos=phenotype_wildcard_combos,
+#         ),
+#     output:
+#         PHENOTYPE_OUTPUTS_MAPPED["combine_phenotype_info"],
+#     script:
+#         "../scripts/shared/combine_dfs.py"
 
 
 # Identify secondary objects from aligned phenotype image and cell segmentation
@@ -198,29 +199,30 @@ rule merge_phenotype:
 
 
 # Evaluate segmentation results
-rule eval_segmentation_phenotype:
-    input:
-        # path to segmentation stats for well/tile
-        segmentation_stats_paths=lambda wildcards: output_to_input(
-            PHENOTYPE_OUTPUTS["segment_phenotype"][2],
-            wildcards=wildcards,
-            expansion_values=["well", "tile"],
-            metadata_combos=phenotype_wildcard_combos,
-        ),
-        # paths to combined cell data
-        cells_paths=lambda wildcards: output_to_input(
-            PHENOTYPE_OUTPUTS["combine_phenotype_info"][0],
-            wildcards=wildcards,
-            expansion_values=["well"],
-            metadata_combos=phenotype_wildcard_combos,
-        ),
-    output:
-        PHENOTYPE_OUTPUTS_MAPPED["eval_segmentation_phenotype"],
-    params:
-        heatmap_shape=config["phenotype"].get("heatmap_shape", "6W_ph"),
-        heatmap_plate=config["phenotype"].get("heatmap_plate", "6W"),
-    script:
-        "../scripts/shared/eval_segmentation.py"
+# [DOWNSTREAM-ONLY MODE] Depends on upstream outputs — commented out.
+# rule eval_segmentation_phenotype:
+#     input:
+#         # path to segmentation stats for well/tile
+#         segmentation_stats_paths=lambda wildcards: output_to_input(
+#             PHENOTYPE_OUTPUTS["segment_phenotype"][2],
+#             wildcards=wildcards,
+#             expansion_values=["well", "tile"],
+#             metadata_combos=phenotype_wildcard_combos,
+#         ),
+#         # paths to combined cell data
+#         cells_paths=lambda wildcards: output_to_input(
+#             PHENOTYPE_OUTPUTS["combine_phenotype_info"][0],
+#             wildcards=wildcards,
+#             expansion_values=["well"],
+#             metadata_combos=phenotype_wildcard_combos,
+#         ),
+#     output:
+#         PHENOTYPE_OUTPUTS_MAPPED["eval_segmentation_phenotype"],
+#     params:
+#         heatmap_shape=config["phenotype"].get("heatmap_shape", "6W_ph"),
+#         heatmap_plate=config["phenotype"].get("heatmap_plate", "6W"),
+#     script:
+#         "../scripts/shared/eval_segmentation.py"
 
 
 rule eval_features:
@@ -241,7 +243,25 @@ rule eval_features:
         "../scripts/phenotype/eval_features.py"
 
 
+# [DOWNSTREAM-ONLY MODE] Only target rules downstream of identify_second_objs.
+# Restore to PHENOTYPE_TARGETS_ALL after the run.
+_DOWNSTREAM_KEYS = [
+    "identify_second_objs",
+    "extract_phenotype_second_objs",
+    "merge_phenotype_second_objs",
+    "extract_phenotype_cp",
+    "merge_second_objs_phenotype_cp",
+    "merge_phenotype_cp",
+    "eval_features",
+]
+PHENOTYPE_TARGETS_DOWNSTREAM = outputs_to_targets(
+    {k: v for k, v in PHENOTYPE_OUTPUTS_FILTERED.items() if k in _DOWNSTREAM_KEYS},
+    phenotype_wildcard_combos,
+    {k: v for k, v in PHENOTYPE_OUTPUT_MAPPINGS_FILTERED.items() if k in _DOWNSTREAM_KEYS},
+)
+
+
 # Rule for all phenotype processing steps
 rule all_phenotype:
     input:
-        PHENOTYPE_TARGETS_ALL,
+        PHENOTYPE_TARGETS_DOWNSTREAM,

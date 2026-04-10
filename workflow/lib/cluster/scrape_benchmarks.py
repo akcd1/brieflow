@@ -350,7 +350,13 @@ def select_gene_variants(benchmark_df, ref_gene_df, ref_gene_col="gene_symbol_0"
 
 
 def filter_complexes(
-    group_df, cluster_df, perturbation_col_name=None, control_key=None
+    group_df,
+    cluster_df,
+    perturbation_col_name=None,
+    control_key=None,
+    min_genes=3,
+    min_coverage=2 / 3,
+    max_size=None,
 ):
     """Filter complexes based on gene coverage and overlap.
 
@@ -359,6 +365,11 @@ def filter_complexes(
         cluster_df (pd.DataFrame): DataFrame with perturbation data.
         perturbation_col_name (str): Column name for gene identifiers.
         control_key (str, optional): Prefix for control perturbations to filter out.
+        min_genes (int, optional): Minimum number of screened genes required per group. Defaults to 3.
+        min_coverage (float, optional): Minimum fraction of group genes that must be in the
+            screen. Set to 0.0 to disable. Defaults to 2/3.
+        max_size (int, optional): Maximum number of genes in a group (based on full group size,
+            not just screened genes). None means no limit. Defaults to None.
 
     Returns:
         pd.DataFrame: Filtered group DataFrame.
@@ -373,11 +384,13 @@ def filter_complexes(
     # 1. Build a dictionary: complex -> set of genes
     complex_to_genes = group_df.groupby("group")["gene_name"].apply(set).to_dict()
 
-    # 2. Find complexes with ≥3 genes from gene_list and ≥2/3 of complex represented
+    # 2. Find complexes passing min_genes, min_coverage, and max_size filters
     selected_complexes = {}
     for complex_name, genes in complex_to_genes.items():
+        if max_size is not None and len(genes) > max_size:
+            continue
         genes_in_library = genes.intersection(gene_list)
-        if len(genes_in_library) >= 3 and len(genes_in_library) / len(genes) >= (2 / 3):
+        if len(genes_in_library) >= min_genes and len(genes_in_library) / len(genes) >= min_coverage:
             selected_complexes[complex_name] = genes_in_library
 
     # 3. Remove larger complexes that share >10% of gene-pairs with smaller ones

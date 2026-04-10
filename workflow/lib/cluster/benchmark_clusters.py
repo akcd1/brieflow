@@ -134,6 +134,7 @@ def evaluate_resolution(
     group_benchmarks,
     perturbation_col_name,
     control_key=None,
+    benchmark_filter_params=None,
 ):
     """Evaluate clustering at different Leiden resolution parameters using pair benchmarks.
 
@@ -147,6 +148,9 @@ def evaluate_resolution(
         group_benchmarks (dict): Dictionary of benchmark DataFrames with known gene groups. Must have a group column.
         perturbation_col_name (str): Column name for gene identifiers.
         control_key (str, optional): Prefix for control perturbations to filter out.
+        benchmark_filter_params (dict, optional): Per-benchmark kwargs passed to filter_complexes,
+            e.g. {"GO:BP": {"min_genes": 5, "min_coverage": 0.0, "max_size": 50}}.
+            Benchmarks not listed use filter_complexes defaults.
 
     Returns:
         tuple:
@@ -172,11 +176,13 @@ def evaluate_resolution(
         # For each benchmark, calculate metrics
         for benchmark_name, group_df in group_benchmarks.items():
             # Filter the benchmark if needed (for group benchmarks)
+            extra_filter_kwargs = (benchmark_filter_params or {}).get(benchmark_name, {})
             filtered_group_benchmark = filter_complexes(
                 group_df,
                 clustering,
                 perturbation_col_name=perturbation_col_name,
                 control_key=control_key,
+                **extra_filter_kwargs,
             )
 
             # Convert group benchmark to pair benchmark format
@@ -244,10 +250,15 @@ def evaluate_resolution(
     # Create visualization figure - smaller figure size for cleaner presentation
     fig, ax = plt.subplots(dpi=300)
 
-    # Define colors and markers for each benchmark - using more standard colors
+    # Dynamically assign colors/markers to all benchmarks present in results
+    _color_cycle = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
+    _marker_cycle = ["o", "s", "^", "D", "v", "P"]
     benchmark_styles = {
-        "CORUM": {"color": "#1f77b4", "marker": "o"},  # blue
-        "KEGG": {"color": "#ff7f0e", "marker": "s"},  # orange
+        name: {
+            "color": _color_cycle[i % len(_color_cycle)],
+            "marker": _marker_cycle[i % len(_marker_cycle)],
+        }
+        for i, name in enumerate(all_results.keys())
     }
 
     # Plot each benchmark
