@@ -282,7 +282,7 @@ def _get_single_aggregate_stats(
     config, cell_class, channel_combo, n_rows, root_fp, aggregate_dir
 ):
     """Helper function to get stats for a single cell_class/channel_combo combination."""
-    from lib.aggregate.cell_data_utils import DEFAULT_METADATA_COLS
+    from lib.phenotype.constants import DEFAULT_METADATA_COLS
     from lib.shared.file_utils import load_parquet_subset
     from sklearn.feature_selection import f_classif
 
