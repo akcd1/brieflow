@@ -44,6 +44,7 @@ def call_cells(
     prefix_recomb="prefix_recomb",
     recomb_filter_col=None,
     recomb_q_thresh=0.1,
+    recomb_hamming_thresh=None,
     sort_calls="peak",
     error_correct=False,
     max_distance=2,
@@ -72,6 +73,9 @@ def call_cells(
         prefix_recomb: Column name for recombination barcode.
         recomb_filter_col: Quality column for filtering recombination calls.
         recomb_q_thresh: Minimum quality for recombination detection.
+        recomb_hamming_thresh: Optional int. Mask no_recomb=False when hamming
+            distance between observed and expected RECOMB barcode is <= threshold
+            (set to NaN). Default None (disabled).
         sort_calls: "count" (by read frequency) or "peak" (by intensity).
         error_correct: Whether to correct sequencing errors against library.
         max_distance: Maximum edit distance for error correction.
@@ -180,18 +184,45 @@ def call_cells(
         expected_recomb = df_mapped[barcode_column].map(recomb_map)
         actual_recomb = df_mapped[prefix_recomb]
         both_valid = expected_recomb.notna() & actual_recomb.notna()
+
+        # Compute Hamming distance for all valid pairs
+        recomb_hamming = pd.array([np.nan] * len(df_mapped), dtype="Int64")
+        if both_valid.any():
+            hamming_distances = [
+                Levenshtein.hamming(str(a), str(e))
+                if len(str(a)) == len(str(e))
+                else np.nan
+                for a, e in zip(
+                    actual_recomb[both_valid].values,
+                    expected_recomb[both_valid].values,
+                )
+            ]
+            recomb_hamming[both_valid] = hamming_distances
+        df_mapped["recomb_hamming"] = recomb_hamming
+
+        # no_recomb: True when distance == 0, False when distance > 0
         no_recomb = pd.array([np.nan] * len(df_mapped), dtype="boolean")
-        no_recomb[both_valid] = (
-            expected_recomb[both_valid].values == actual_recomb[both_valid].values
-        )
+        no_recomb[both_valid] = recomb_hamming[both_valid] == 0
         df_mapped["no_recomb"] = no_recomb
+
+        # Clear unmapped cells
         df_mapped.loc[~df_mapped.mapped, "no_recomb"] = np.nan
+        df_mapped.loc[~df_mapped.mapped, "recomb_hamming"] = np.nan
+
+        # Quality filter (existing behavior)
         if recomb_filter_col is not None:
-            df_mapped.loc[
-                df_mapped[recomb_filter_col] < recomb_q_thresh, "no_recomb"
-            ] = np.nan
+            low_quality = df_mapped[recomb_filter_col] < recomb_q_thresh
+            df_mapped.loc[low_quality, "no_recomb"] = np.nan
+
+        # Hamming threshold filter
+        if recomb_hamming_thresh is not None:
+            ambiguous = (df_mapped["no_recomb"] == False) & (
+                df_mapped["recomb_hamming"] <= recomb_hamming_thresh
+            )
+            df_mapped.loc[ambiguous, "no_recomb"] = np.nan
     else:
         df_mapped["no_recomb"] = np.nan
+        df_mapped["recomb_hamming"] = np.nan
 
     # === STEP 6: Rank barcodes per cell ===
 
@@ -215,7 +246,7 @@ def call_cells(
     # === STEP 7: Build per-barcode output ===
 
     q_cols = [c for c in df_mapped.columns if c.startswith("Q_")]
-    per_read_cols = q_cols + ["no_recomb", "peak", "mapped"]
+    per_read_cols = q_cols + ["no_recomb", "recomb_hamming", "peak", "mapped"]
     if pre_correct_col and pre_correct_col in df_mapped.columns:
         per_read_cols.append(pre_correct_col)
 
@@ -267,6 +298,7 @@ def call_cells(
         rename = {
             barcode_column: f"cell_barcode_{rank}",
             "no_recomb": f"no_recomb_{rank}",
+            "recomb_hamming": f"recomb_hamming_{rank}",
             "peak": f"cell_barcode_peak_{rank}",
         }
         for qc in q_cols:
@@ -361,6 +393,8 @@ def _get_empty_output():
         "cell_barcode_1",
         "no_recomb_0",
         "no_recomb_1",
+        "recomb_hamming_0",
+        "recomb_hamming_1",
         "Q_min_0",
         "Q_min_1",
         "gene_symbol_0",

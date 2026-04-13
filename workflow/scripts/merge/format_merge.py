@@ -39,6 +39,7 @@ for col in sbs_cells.columns:
             "gene_symbol_",
             "gene_id_",
             "no_recomb_",
+            "recomb_hamming_",
             "Q_min_",
             "Q_recomb_",
             "cell_barcode_peak_",

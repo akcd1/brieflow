@@ -22,6 +22,8 @@ DEFAULT_METADATA_COLS = [
     "gene_id_1",
     "no_recomb_0",
     "no_recomb_1",
+    "recomb_hamming_0",
+    "recomb_hamming_1",
     "Q_min_0",
     "Q_min_1",
     "Q_recomb_0",
