@@ -44,5 +44,12 @@ vacuole_phenotype = extract_phenotype_vacuoles(
     channel_names=snakemake.params.channel_names,
 )
 
+# Add source folder and plate label from config
+plate = str(snakemake.wildcards.plate)
+plate_folders = snakemake.config["preprocess"].get("plate_folders", {})
+vacuole_phenotype["source_folder"] = plate_folders.get(plate, "")
+plate_labels = snakemake.config["preprocess"].get("plate_labels", {})
+vacuole_phenotype["plate_label"] = plate_labels.get(plate, "")
+
 # Save results
 vacuole_phenotype.to_csv(snakemake.output[0], sep="\t", index=False)

@@ -118,6 +118,13 @@ PHENOTYPE_OUTPUTS = {
             {"plate": "{plate}"}, "phenotype_vacuoles", "parquet"
         ),
     ],
+    "log_phenotype_run": [
+        ROOT_FP
+        / "run_logs"
+        / get_filename(
+            {"plate": "{plate}"}, "run_log", "csv"
+        ),
+    ],
     "merge_vacuoles_phenotype_cp": [
         PHENOTYPE_FP
         / "tsvs"
@@ -181,6 +188,7 @@ PHENOTYPE_OUTPUT_MAPPINGS = {
     "extract_phenotype_cp": temp,
     "extract_phenotype_vacuoles": temp,
     "merge_phenotype_vacuoles": None,
+    "log_phenotype_run": None,
     "merge_vacuoles_phenotype_cp": None,
     "merge_phenotype_cp": None,
     "eval_segmentation_phenotype": None,
@@ -201,6 +209,7 @@ ALWAYS_REQUIRED_OUTPUTS = [
     "identify_vacuoles",
     "extract_phenotype_vacuoles",
     "merge_phenotype_vacuoles",
+    "log_phenotype_run",
 ]
 
 # Define outputs that are ONLY required when segment_cells=true

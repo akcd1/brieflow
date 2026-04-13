@@ -235,6 +235,18 @@ if config["phenotype"]["segment_cells"]:
             "../scripts/phenotype/eval_features.py"
 
 
+# Log run parameters after phenotyping completes
+rule log_phenotype_run:
+    input:
+        PHENOTYPE_OUTPUTS["merge_phenotype_vacuoles"],
+    output:
+        PHENOTYPE_OUTPUTS_MAPPED["log_phenotype_run"],
+    params:
+        run_config=config,
+    script:
+        "../scripts/shared/log_run.py"
+
+
 # Rule for all phenotype processing steps
 rule all_phenotype:
     input:

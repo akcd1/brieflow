@@ -5,6 +5,8 @@ DEFAULT_METADATA_COLS = [
     "folder",
     "well",
     "tile",
+    "source_folder",
+    "plate_label",
     "cell_0",
     "i_0",
     "j_0",
