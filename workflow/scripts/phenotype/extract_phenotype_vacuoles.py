@@ -44,12 +44,17 @@ vacuole_phenotype = extract_phenotype_vacuoles(
     channel_names=snakemake.params.channel_names,
 )
 
-# Add source folder and plate label from config
+# Add source folder from config
 plate = str(snakemake.wildcards.plate)
 plate_folders = snakemake.config["preprocess"].get("plate_folders", {})
 vacuole_phenotype["source_folder"] = plate_folders.get(plate, "")
-plate_labels = snakemake.config["preprocess"].get("plate_labels", {})
-vacuole_phenotype["plate_label"] = plate_labels.get(plate, "")
+
+# Add row label from config (plate → row letter → label)
+row_labels = snakemake.config["preprocess"].get("row_labels", {})
+plate_row_labels = row_labels.get(plate, {})
+well = str(snakemake.wildcards.well)
+row_letter = well[0]  # e.g., "A1" → "A"
+vacuole_phenotype["row_label"] = plate_row_labels.get(row_letter, "")
 
 # Save results
 vacuole_phenotype.to_csv(snakemake.output[0], sep="\t", index=False)
