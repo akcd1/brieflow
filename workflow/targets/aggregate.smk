@@ -186,6 +186,18 @@ AGGREGATE_TARGETS_ALL = outputs_to_targets(
     AGGREGATE_OUTPUTS_FILTERED, aggregate_wildcard_combos, AGGREGATE_OUTPUT_MAPPINGS_FILTERED
 )
 
+# Validation: joint class alignment requires a classifier
+if (aggregate_wildcard_combos["cell_class"] == "joint").any():
+    classifier_path = config.get("classify", {}).get("classifier_path")
+    if classifier_path is None:
+        raise ValueError(
+            "aggregate_combo.tsv contains cell_class='joint' rows, but "
+            "config.classify.classifier_path is not set. Joint class alignment "
+            "requires a classifier to label cells by class. Either set "
+            "classify.classifier_path or disable joint rows (ENABLE_JOINT_ALIGNMENT=False "
+            "in 8.configure_aggregate_params.ipynb)."
+        )
+
 
 # Define montage outputs
 # These are special because we dynamically derive outputs
@@ -221,7 +233,10 @@ MONTAGE_OUTPUTS = {
     ),
     "montage_flag": AGGREGATE_FP / "montages" / "{cell_class}__montages_complete.flag",
 }
-cell_classes = aggregate_wildcard_combos["cell_class"].unique()
+cell_classes = [
+    c for c in aggregate_wildcard_combos["cell_class"].unique()
+    if c != "joint"
+]
 MONTAGE_TARGETS_ALL = [
     str(MONTAGE_OUTPUTS["montage_flag"]).format(cell_class=cell_class)
     for cell_class in cell_classes
