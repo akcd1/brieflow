@@ -182,8 +182,19 @@ AGGREGATE_OUTPUTS_MAPPED = map_outputs(AGGREGATE_OUTPUTS_FILTERED, AGGREGATE_OUT
 #     & (aggregate_wildcard_combos["channel_combo"].isin(["DAPI_WGA"]))
 # ]
 
+# split_datasets is only produced for non-joint cell_class (see rule split_datasets
+# in aggregate.smk); joint rows consume per-class split_datasets outputs via _filter_inputs.
+_split_only = {"split_datasets": AGGREGATE_OUTPUTS_FILTERED["split_datasets"]}
+_split_mappings = {"split_datasets": AGGREGATE_OUTPUT_MAPPINGS_FILTERED["split_datasets"]}
+_non_split = {k: v for k, v in AGGREGATE_OUTPUTS_FILTERED.items() if k != "split_datasets"}
+_non_split_mappings = {k: v for k, v in AGGREGATE_OUTPUT_MAPPINGS_FILTERED.items() if k != "split_datasets"}
+
 AGGREGATE_TARGETS_ALL = outputs_to_targets(
-    AGGREGATE_OUTPUTS_FILTERED, aggregate_wildcard_combos, AGGREGATE_OUTPUT_MAPPINGS_FILTERED
+    _split_only,
+    aggregate_wildcard_combos[aggregate_wildcard_combos["cell_class"] != "joint"],
+    _split_mappings,
+) + outputs_to_targets(
+    _non_split, aggregate_wildcard_combos, _non_split_mappings
 )
 
 # Validation: joint class alignment requires a classifier
