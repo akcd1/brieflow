@@ -16,27 +16,30 @@ def aggregate(
     method="mean",
     ps_probability_threshold=None,
     ps_percentile_threshold=None,
+    group_cols: list[str] | None = None,
 ) -> tuple[np.ndarray, pd.DataFrame]:
-    """Apply mean or median aggregation to replicate embeddings and perturbation scores for each perturbation.
+    """Apply mean or median aggregation to replicate embeddings and perturbation scores.
 
     Rows with perturbation_score below the threshold are dropped (NaNs kept). The function
-    returns aggregated embeddings and metadata with perturbation labels, cell counts, and
+    returns aggregated embeddings and metadata with grouping labels, cell counts, and
     aggregated perturbation scores.
 
     Args:
-        embeddings (numpy.ndarray): The embeddings to be aggregated.
-        metadata (pandas.DataFrame): The metadata containing information about the embeddings.
-        pert_col (str): The column in the metadata containing perturbation information.
-        method (str, optional): The aggregation method to use. Must be either "mean" or "median".
-            Defaults to "mean".
-        ps_probability_threshold (float, optional): Threshold for filtering based on perturbation score.
-        ps_percentile_threshold (float, optional): Percentile threshold for filtering based on perturbation score.
+        embeddings: The embeddings to be aggregated.
+        metadata: The metadata containing information about the embeddings.
+        pert_col: The column in the metadata containing perturbation information.
+            When `group_cols` is None, grouping is by this column alone.
+        method: Aggregation method, "mean" or "median".
+        ps_probability_threshold: Threshold for filtering based on perturbation score.
+        ps_percentile_threshold: Percentile threshold for filtering based on perturbation score.
+        group_cols: Optional list of columns to group by (e.g. ["class", pert_col] for
+            joint class alignment). Defaults to [pert_col].
 
     Returns:
         tuple:
-            - numpy.ndarray: Aggregated embeddings.
-            - pandas.DataFrame: Metadata with perturbation labels, cell counts,
-              and aggregated perturbation scores.
+            - np.ndarray: Aggregated embeddings.
+            - pd.DataFrame: Metadata with grouping labels, cell counts, and aggregated
+              perturbation scores.
     """
     aggregated_embeddings = []
     aggregated_metadata = []
@@ -48,7 +51,9 @@ def aggregate(
     if aggr_func is None:
         raise ValueError(f"Invalid aggregation method: {method}")
 
-    # filter by ps_probability_threshold; keep NaNs
+    if group_cols is None:
+        group_cols = [pert_col]
+
     if ps_probability_threshold is not None:
         mask = metadata["perturbation_score"].isna() | (
             metadata["perturbation_score"] >= ps_probability_threshold
@@ -56,7 +61,6 @@ def aggregate(
         metadata = metadata.loc[mask].reset_index(drop=True)
         embeddings = embeddings[mask.to_numpy(), :]
 
-    # filter by ps_percentile_threshold; keep NaNs
     if ps_percentile_threshold is not None:
         threshold_value = np.nanpercentile(
             metadata["perturbation_score"], ps_percentile_threshold * 100
@@ -67,15 +71,20 @@ def aggregate(
         metadata = metadata.loc[mask].reset_index(drop=True)
         embeddings = embeddings[mask.to_numpy(), :]
 
-    grouping = metadata.groupby(pert_col)
-    for pert, group in grouping:
+    grouping = metadata.groupby(group_cols)
+    for group_key, group in grouping:
         final_emb = aggr_func(embeddings[group.index.values, :], axis=0)
         aggregated_embeddings.append(final_emb)
 
-        agg_meta = {
-            pert_col: pert,
-            "cell_count": len(group),
-        }
+        # group_key is a scalar when groupby receives a string, a tuple when it
+        # receives a list (even a list of length 1).
+        if isinstance(group_key, tuple):
+            key_values = list(group_key)
+        else:
+            key_values = [group_key]
+
+        agg_meta = dict(zip(group_cols, key_values))
+        agg_meta["cell_count"] = len(group)
 
         # Always include perturbation_auc if present (needed for gene-level filtering in clustering)
         if "perturbation_auc" in metadata.columns:
@@ -88,7 +97,6 @@ def aggregate(
                 if not group["perturbation_score"].isna().all()
                 else np.nan
             )
-
             agg_meta["aggregated_perturbation_score"] = pert_score
 
         aggregated_metadata.append(agg_meta)

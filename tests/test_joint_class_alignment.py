@@ -61,3 +61,66 @@ def test_stratified_subsample_total_greater_than_rows_returns_all():
     rng = np.random.default_rng(0)
     idx = stratified_subsample(classes, n_total=1_000, min_per_class=10, rng=rng)
     assert len(idx) == 200
+
+
+from lib.aggregate.aggregate import aggregate as aggregate_fn
+
+
+def test_aggregate_default_groups_by_pert_col_only():
+    metadata = pd.DataFrame(
+        {
+            "pert": ["g1", "g1", "g2", "g2"],
+            "class": ["A", "B", "A", "B"],
+        }
+    )
+    embeddings = np.array([[1.0], [3.0], [5.0], [7.0]])
+    emb, meta = aggregate_fn(embeddings, metadata, "pert", method="mean")
+    assert len(meta) == 2  # g1, g2 (class ignored)
+    assert set(meta["pert"]) == {"g1", "g2"}
+
+
+def test_aggregate_groups_by_class_and_pert():
+    metadata = pd.DataFrame(
+        {
+            "pert": ["g1", "g1", "g2", "g2"],
+            "class": ["A", "B", "A", "B"],
+        }
+    )
+    embeddings = np.array([[1.0], [3.0], [5.0], [7.0]])
+    emb, meta = aggregate_fn(
+        embeddings,
+        metadata,
+        "pert",
+        method="mean",
+        group_cols=["class", "pert"],
+    )
+    assert len(meta) == 4  # each (class, pert) is its own row
+    assert set(zip(meta["class"], meta["pert"])) == {
+        ("A", "g1"),
+        ("B", "g1"),
+        ("A", "g2"),
+        ("B", "g2"),
+    }
+    # Values: (A,g1)=1, (B,g1)=3, (A,g2)=5, (B,g2)=7
+    row_map = {(r["class"], r["pert"]): emb[i, 0] for i, r in meta.iterrows()}
+    assert row_map[("A", "g1")] == 1.0
+    assert row_map[("B", "g2")] == 7.0
+
+
+def test_aggregate_group_cols_preserves_cell_count():
+    metadata = pd.DataFrame(
+        {
+            "pert": ["g1"] * 6,
+            "class": ["A", "A", "A", "B", "B", "B"],
+        }
+    )
+    embeddings = np.ones((6, 2))
+    emb, meta = aggregate_fn(
+        embeddings,
+        metadata,
+        "pert",
+        method="mean",
+        group_cols=["class", "pert"],
+    )
+    assert len(meta) == 2
+    assert set(meta["cell_count"]) == {3}
