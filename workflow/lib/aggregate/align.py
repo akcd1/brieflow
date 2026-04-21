@@ -253,6 +253,75 @@ def median_absolute_deviation(arr):
     return mad
 
 
+def stratified_subsample(
+    classes: np.ndarray,
+    n_total: int,
+    min_per_class: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Return row indices for a stratified subsample across class labels.
+
+    Each class gets at least `min_per_class` rows if it has that many; otherwise it
+    contributes all its rows. Remaining budget (after flooring rare classes) is
+    distributed proportionally to remaining class sizes. If `n_total` exceeds the
+    total number of rows, all rows are returned.
+
+    Args:
+        classes: 1-D array of class labels, one entry per row.
+        n_total: Target total sample size.
+        min_per_class: Per-class floor; classes smaller than this contribute all rows.
+        rng: Seeded numpy Generator for reproducibility.
+
+    Returns:
+        np.ndarray of int indices into the original array, sorted.
+    """
+    n_rows = len(classes)
+    if n_total >= n_rows:
+        return np.arange(n_rows)
+
+    unique_classes, class_counts = np.unique(classes, return_counts=True)
+    class_to_indices = {c: np.where(classes == c)[0] for c in unique_classes}
+
+    allocations: dict = {}
+    remaining_budget = n_total
+    proportional_pool = []  # classes that hit the floor and can take more
+
+    for c, count in zip(unique_classes, class_counts):
+        if count <= min_per_class:
+            allocations[c] = count
+            remaining_budget -= count
+        else:
+            allocations[c] = min_per_class
+            remaining_budget -= min_per_class
+            proportional_pool.append((c, count - min_per_class))
+
+    # Distribute any leftover proportionally among pool classes (by remaining-after-floor size)
+    if remaining_budget > 0 and proportional_pool:
+        pool_sizes = np.array([size for _, size in proportional_pool], dtype=float)
+        pool_total = pool_sizes.sum()
+        extra = (pool_sizes / pool_total * remaining_budget).astype(int)
+        # Hand out rounding remainder to the largest bucket
+        shortfall = remaining_budget - extra.sum()
+        if shortfall > 0:
+            extra[np.argmax(pool_sizes)] += shortfall
+        for (c, _), n_extra in zip(proportional_pool, extra):
+            allocations[c] += int(n_extra)
+
+    picked = []
+    for c in unique_classes:
+        pool = class_to_indices[c]
+        k = allocations[c]
+        if k >= len(pool):
+            chosen = pool
+        else:
+            chosen = rng.choice(pool, size=k, replace=False)
+        picked.append(chosen)
+
+    idx = np.concatenate(picked)
+    idx.sort()
+    return idx
+
+
 def centerscale_on_controls(
     embeddings: np.ndarray,
     metadata: pd.DataFrame,
