@@ -162,6 +162,10 @@ all_compartments_run = sorted(
 
 for _, row in unique_specs.iterrows():
     cell_class = row["cell_class"]
+    # Defensive: joint rows are filtered from aggregate_wildcard_combos at rule level,
+    # but skip here as belt-and-suspenders in case this script is ever called with them.
+    if cell_class == "joint":
+        continue
     channel_combo = row["channel_combo"]
     compartment_combo = row["compartment_combo"]
 

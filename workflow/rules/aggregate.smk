@@ -30,7 +30,7 @@ rule split_datasets:
     priority: 100
     output:
         map_wildcard_outputs(
-            aggregate_wildcard_combos,
+            aggregate_wildcard_combos[aggregate_wildcard_combos["cell_class"] != "joint"],
             AGGREGATE_OUTPUTS["split_datasets"][0],
             ["cell_class", "channel_combo", "compartment_combo"],
         ),
@@ -41,7 +41,7 @@ rule split_datasets:
         confidence_thresholds=config.get("classify", {}).get("confidence_thresholds"),
         class_title=config.get("classify", {}).get("class_title"),
         class_mapping=config.get("classify", {}).get("class_mapping"),
-        aggregate_wildcard_combos=aggregate_wildcard_combos,
+        aggregate_wildcard_combos=aggregate_wildcard_combos[aggregate_wildcard_combos["cell_class"] != "joint"],
     script:
         "../scripts/aggregate/split_datasets.py"
 
