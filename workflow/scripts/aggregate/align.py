@@ -15,6 +15,7 @@ from lib.aggregate.align import (
     prepare_alignment_data,
     centerscale_by_batch,
     tvn_on_controls,
+    stratified_subsample,
 )
 from lib.aggregate.perturbation_score import perturbation_score
 
@@ -26,8 +27,12 @@ warnings.filterwarnings(
 )
 np.random.seed(0)
 
-## Step 1: Create PCA transformation
-PCA_SUBSET = 100000
+# PCA subsample constants (hardcoded per design)
+PCA_SUBSET = 100_000
+JOINT_PCA_SUBSAMPLE = 100_000
+JOINT_PCA_MIN_PER_CLASS = 5_000
+
+is_joint = snakemake.wildcards.cell_class == "joint"
 
 # Filter out empty parquet files to avoid schema conflicts
 non_empty_paths = [
@@ -39,25 +44,42 @@ if len(non_empty_paths) == 0:
     pq.write_table(pa.table({}), snakemake.output[0])
     exit(0)
 
-# Load full dataset as logical PyArrow dataset (only non-empty files)
 cell_dataset = ds.dataset(non_empty_paths, format="parquet")
 total_rows = cell_dataset.count_rows()
 print(
     f"Number of rows across {len(non_empty_paths)} non-empty parquet files: {total_rows}"
 )
 
-# Choose random row indices
-n_sample = min(PCA_SUBSET, total_rows)
-random_indices = np.random.choice(total_rows, size=n_sample, replace=False)
-random_indices.sort()
-
-# load sample df
-sample_df = cell_dataset.scanner().take(random_indices)
-sample_df = sample_df.to_pandas(use_threads=True, memory_pool=None)
-
-# load sample df as pandas dataframe
 use_classifier = snakemake.params.get("use_classifier", False)
 metadata_cols = load_metadata_cols(snakemake.params.metadata_cols_fp, use_classifier)
+
+# ---- Step 1: Build PCA ----
+if is_joint:
+    # Load class labels only (cheap), then stratified subsample, then read those rows.
+    class_arr = cell_dataset.to_table(columns=["class"]).to_pandas()["class"].to_numpy()
+    rng = np.random.default_rng(0)
+    sample_indices = stratified_subsample(
+        class_arr, JOINT_PCA_SUBSAMPLE, JOINT_PCA_MIN_PER_CLASS, rng
+    )
+    print(
+        f"JOINT PCA: stratified subsample of {len(sample_indices)} rows across "
+        f"classes {dict(pd.Series(class_arr[sample_indices]).value_counts())}"
+    )
+    sample_df = (
+        cell_dataset.scanner()
+        .take(pa.array(sample_indices))
+        .to_pandas(use_threads=True, memory_pool=None)
+    )
+else:
+    n_sample = min(PCA_SUBSET, total_rows)
+    random_indices = np.random.choice(total_rows, size=n_sample, replace=False)
+    random_indices.sort()
+    sample_df = (
+        cell_dataset.scanner()
+        .take(random_indices)
+        .to_pandas(use_threads=True, memory_pool=None)
+    )
+
 metadata, features = split_cell_data(sample_df, metadata_cols)
 metadata, features = prepare_alignment_data(
     metadata,
@@ -71,9 +93,7 @@ pca = PCA(n_components=snakemake.params.variance_or_ncomp).fit(
     centerscale_by_batch(features, metadata, "batch_values")
 )
 
-## Step 2: Batched alignment
-
-# Determine subset indices
+# ---- Step 2: Batched alignment ----
 num_align_batches = snakemake.params.num_align_batches
 all_indices = np.random.permutation(total_rows)
 chunk_size = math.ceil(total_rows / num_align_batches)
@@ -81,7 +101,29 @@ subset_indices = [
     all_indices[i * chunk_size : (i + 1) * chunk_size] for i in range(num_align_batches)
 ]
 
-# Process each batch
+
+def _compute_perturbation_score_joint(
+    subset_df: pd.DataFrame, metadata_cols_local: list
+) -> pd.DataFrame:
+    """Compute perturbation_score and perturbation_auc per class and stitch back."""
+    parts = []
+    subset_df = subset_df.copy()
+    for cls, part in subset_df.groupby("class", sort=False):
+        part = part.copy()
+        part["perturbation_score"] = np.nan
+        part["perturbation_auc"] = np.nan
+        perturbation_score(
+            part,
+            metadata_cols_local,
+            snakemake.params.perturbation_name_col,
+            snakemake.params.control_key,
+        )
+        parts.append(part)
+    out = pd.concat(parts, axis=0)
+    # Preserve original row order
+    return out.loc[subset_df.index]
+
+
 writer = None
 for i, indices in enumerate(subset_indices):
     print(f"Processing subset {i + 1}/{num_align_batches} with {len(indices)} cells")
@@ -93,23 +135,28 @@ for i, indices in enumerate(subset_indices):
         .dropna(axis=1)
     )
 
-    # CALCULATE PERTURBATION SCORE
     subset_df["perturbation_score"] = np.nan
     subset_df["perturbation_auc"] = np.nan
-    metadata_cols += ["perturbation_score", "perturbation_auc"]
+    chunk_metadata_cols = metadata_cols + ["perturbation_score", "perturbation_auc"]
+
     if not snakemake.params.skip_perturbation_score:
-        perturbation_score(
-            subset_df,
-            metadata_cols,
-            snakemake.params.perturbation_name_col,
-            snakemake.params.control_key,
-        )
+        if is_joint:
+            subset_df = _compute_perturbation_score_joint(
+                subset_df, chunk_metadata_cols
+            )
+        else:
+            perturbation_score(
+                subset_df,
+                chunk_metadata_cols,
+                snakemake.params.perturbation_name_col,
+                snakemake.params.control_key,
+            )
 
     for col in subset_df.columns:
         if is_numeric_dtype(subset_df[col]):
             subset_df[col] = subset_df[col].astype("float32")
 
-    metadata, features = split_cell_data(subset_df, metadata_cols)
+    metadata, features = split_cell_data(subset_df, chunk_metadata_cols)
     del subset_df
     gc.collect()
 
@@ -123,17 +170,53 @@ for i, indices in enumerate(subset_indices):
     )
 
     features = centerscale_by_batch(features, metadata, "batch_values")
-
     features = pca.transform(features)
 
-    features = tvn_on_controls(
-        features,
-        metadata,
-        snakemake.params.perturbation_name_col,
-        snakemake.params.control_key,
-        "batch_values",
-        control_col=snakemake.params.get("control_name_col"),
-    )
+    if is_joint:
+        # Per-class TVN: split by class, TVN each with its own controls, concat in order.
+        aligned_features = np.empty_like(features)
+        for cls in metadata["class"].unique():
+            cls_mask = (metadata["class"] == cls).to_numpy()
+            cls_meta = metadata.loc[cls_mask].reset_index(drop=True)
+            cls_emb = features[cls_mask]
+            cls_emb = tvn_on_controls(
+                cls_emb,
+                cls_meta,
+                snakemake.params.perturbation_name_col,
+                snakemake.params.control_key,
+                "batch_values",
+                control_col=snakemake.params.get("control_name_col"),
+            )
+            aligned_features[cls_mask] = cls_emb
+
+            # Diagnostic: per-class control mean/std per PC after TVN
+            lookup_col = (
+                snakemake.params.get("control_name_col")
+                or snakemake.params.perturbation_name_col
+            )
+            ctrl_mask_local = (
+                cls_meta[lookup_col]
+                .astype(str)
+                .str.startswith(snakemake.params.control_key)
+                .to_numpy()
+            )
+            if ctrl_mask_local.sum() > 0:
+                ctrl_mean = cls_emb[ctrl_mask_local].mean(axis=0)
+                ctrl_std = cls_emb[ctrl_mask_local].std(axis=0)
+                print(
+                    f"[JOINT TVN] class={cls} controls={int(ctrl_mask_local.sum())} "
+                    f"mean_abs(mean)={np.abs(ctrl_mean).mean():.4f} mean(std)={ctrl_std.mean():.4f}"
+                )
+        features = aligned_features
+    else:
+        features = tvn_on_controls(
+            features,
+            metadata,
+            snakemake.params.perturbation_name_col,
+            snakemake.params.control_key,
+            "batch_values",
+            control_col=snakemake.params.get("control_name_col"),
+        )
 
     feature_columns = [f"PC_{j}" for j in range(features.shape[1])]
     features = pd.DataFrame(features, index=metadata.index, columns=feature_columns)
@@ -141,12 +224,10 @@ for i, indices in enumerate(subset_indices):
     del features
     gc.collect()
 
-    # Convert to Arrow table and write chunk
     aligned_cell_data = pa.Table.from_pandas(aligned_cell_data, preserve_index=False)
     if writer is None:
         writer = pq.ParquetWriter(snakemake.output[0], aligned_cell_data.schema)
     writer.write_table(aligned_cell_data)
 
-# Close writer
 if writer is not None:
     writer.close()
