@@ -4,11 +4,9 @@ import pandas as pd
 from lib.aggregate.cell_data_utils import load_metadata_cols, split_cell_data
 from lib.aggregate.aggregate import aggregate
 
-# Load cell data using PyArrow dataset
 print("Loading cell data")
 cell_data = ds.dataset(snakemake.input[0], format="parquet")
 
-# Handle empty input gracefully
 if cell_data.count_rows() == 0:
     print("WARNING: No cells in input, writing empty output")
     pd.DataFrame().to_csv(snakemake.output[0], sep="\t", index=False)
@@ -17,7 +15,6 @@ if cell_data.count_rows() == 0:
 cell_data = cell_data.to_table(use_threads=True, memory_pool=None).to_pandas()
 print(f"Shape of input data: {cell_data.shape}")
 
-# Split aligned data into features and metadata
 use_classifier = snakemake.params.get("use_classifier", False)
 metadata_cols = load_metadata_cols(
     snakemake.params.metadata_cols_fp, include_classification_cols=use_classifier
@@ -26,17 +23,24 @@ metadata, tvn_normalized = split_cell_data(cell_data, metadata_cols)
 tvn_normalized = tvn_normalized.to_numpy()
 del cell_data
 
-# Aggregate
+is_joint = snakemake.wildcards.cell_class == "joint"
+pert_col = snakemake.params.perturbation_name_col
+
+if is_joint:
+    group_cols = ["class", pert_col]
+else:
+    group_cols = None  # defaults to [pert_col] in aggregate()
+
 aggregated_embeddings, aggregated_metadata = aggregate(
     tvn_normalized,
     metadata,
-    snakemake.params.perturbation_name_col,
+    pert_col,
     method=snakemake.params.agg_method,
     ps_probability_threshold=snakemake.params.ps_probability_threshold,
     ps_percentile_threshold=snakemake.params.ps_percentile_threshold,
+    group_cols=group_cols,
 )
 
-# Save aggregated data
 feature_columns = [f"PC_{i}" for i in range(tvn_normalized.shape[1])]
 aggregated_embeddings_df = pd.DataFrame(
     aggregated_embeddings, index=aggregated_metadata.index, columns=feature_columns
