@@ -46,21 +46,53 @@ rule split_datasets:
         "../scripts/aggregate/split_datasets.py"
 
 
+def _filter_inputs(wildcards):
+    """Return the split_datasets input(s) for the filter rule.
+
+    For cell_class="joint", expand across all non-joint/non-all classes for the same
+    (channel_combo, compartment_combo, plate, well). Otherwise, the single split_datasets
+    output for this wildcard combo.
+    """
+    if wildcards.cell_class == "joint":
+        classes = [
+            c for c in aggregate_wildcard_combos["cell_class"].unique()
+            if c not in {"joint", "all"}
+        ]
+        template = str(AGGREGATE_OUTPUTS["split_datasets"][0])
+        return [
+            template.format(
+                plate=wildcards.plate,
+                well=wildcards.well,
+                cell_class=c,
+                channel_combo=wildcards.channel_combo,
+                compartment_combo=wildcards.compartment_combo,
+            )
+            for c in classes
+        ]
+    # Non-joint: keep the single-input wildcard behavior.
+    template = str(AGGREGATE_OUTPUTS["split_datasets"][0])
+    return template.format(
+        plate=wildcards.plate,
+        well=wildcards.well,
+        cell_class=wildcards.cell_class,
+        channel_combo=wildcards.channel_combo,
+        compartment_combo=wildcards.compartment_combo,
+    )
+
+
 rule filter:
     input:
-        AGGREGATE_OUTPUTS_MAPPED["split_datasets"],
+        _filter_inputs,
     priority: 100
     output:
         AGGREGATE_OUTPUTS_MAPPED["filter"],
     params:
         metadata_cols_fp=config["aggregate"]["metadata_cols_fp"],
         use_classifier=config.get("classify", {}).get("classifier_path") is not None,
-        filter_queries=lambda wildcards: (
-            (config["aggregate"]["filter_queries"] or [])
-            + config["aggregate"]
-            .get("filter_queries_by_class", {})
-            .get(wildcards.cell_class, [])
-        ),
+        # Global query filters (always applied)
+        filter_queries=config["aggregate"]["filter_queries"] or [],
+        # Full per-class query map; the script applies the right subset per class.
+        filter_queries_by_class=config["aggregate"].get("filter_queries_by_class", {}) or {},
         perturbation_name_col=config["aggregate"]["perturbation_name_col"],
         drop_cols_threshold=config["aggregate"]["drop_cols_threshold"],
         drop_rows_threshold=config["aggregate"]["drop_rows_threshold"],
