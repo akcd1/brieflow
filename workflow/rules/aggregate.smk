@@ -179,21 +179,55 @@ rule aggregate:
         "../scripts/aggregate/aggregate.py"
 
 
+def _eval_aggregate_split_paths(wildcards):
+    """Split-datasets input for eval_aggregate.
+
+    For cell_class="joint", expand across all non-joint/non-all classes (same pattern as
+    the filter rule's input). Otherwise, existing per-class behavior.
+    """
+    if wildcards.cell_class == "joint":
+        classes = [
+            c for c in aggregate_wildcard_combos["cell_class"].unique()
+            if c not in {"joint", "all"}
+        ]
+        template = str(AGGREGATE_OUTPUTS_MAPPED["split_datasets"][0])
+        subset = aggregate_wildcard_combos[
+            (aggregate_wildcard_combos["cell_class"] == "joint")
+            & (aggregate_wildcard_combos["channel_combo"] == wildcards.channel_combo)
+            & (aggregate_wildcard_combos["compartment_combo"] == wildcards.compartment_combo)
+        ]
+        paths = []
+        for _, row in subset.iterrows():
+            for c in classes:
+                paths.append(
+                    template.format(
+                        plate=row["plate"],
+                        well=row["well"],
+                        cell_class=c,
+                        channel_combo=wildcards.channel_combo,
+                        compartment_combo=wildcards.compartment_combo,
+                    )
+                )
+        return paths
+
+    return output_to_input(
+        AGGREGATE_OUTPUTS_MAPPED["split_datasets"],
+        wildcards={
+            "cell_class": wildcards.cell_class,
+            "channel_combo": wildcards.channel_combo,
+            "compartment_combo": wildcards.compartment_combo,
+        },
+        expansion_values=["plate", "well"],
+        metadata_combos=aggregate_wildcard_combos,
+    )
+
+
 rule eval_aggregate:
     input:
         # aggregated gene data
         AGGREGATE_OUTPUTS_MAPPED["align"],
         # class merge data
-        split_datasets_paths=lambda wildcards: output_to_input(
-            AGGREGATE_OUTPUTS_MAPPED["split_datasets"],
-            wildcards={
-                "cell_class": wildcards.cell_class,
-                "channel_combo": wildcards.channel_combo,
-                "compartment_combo": wildcards.compartment_combo,
-            },
-            expansion_values=["plate", "well"],
-            metadata_combos=aggregate_wildcard_combos,
-        ),
+        split_datasets_paths=_eval_aggregate_split_paths,
     priority: 100
     output:
         AGGREGATE_OUTPUTS_MAPPED["eval_aggregate"],
