@@ -184,6 +184,52 @@ AGGREGATE_OUTPUTS_MAPPED = map_outputs(AGGREGATE_OUTPUTS_FILTERED, AGGREGATE_OUT
 
 # split_datasets is only produced for non-joint cell_class (see rule split_datasets
 # in aggregate.smk); joint rows consume per-class split_datasets outputs via _filter_inputs.
+#
+# If a joint row is declared for a (channel_combo, compartment_combo) pair but the
+# corresponding per-class rows aren't in aggregate_wildcard_combos, split_datasets
+# would fail to produce the merge_data parquets that joint filtering needs to pool.
+# Augment the TSV used by split_datasets (and only split_datasets) with synthesized
+# per-class rows for every joint row. Filter / align / aggregate / eval_aggregate
+# still operate from the original user-declared TSV, so users don't get downstream
+# outputs for classes they didn't request.
+_joint_rows = aggregate_wildcard_combos[aggregate_wildcard_combos["cell_class"] == "joint"]
+_real_classes_for_joint = sorted(
+    c for c in aggregate_wildcard_combos["cell_class"].unique()
+    if c not in {"joint", "all"}
+)
+if not _joint_rows.empty and _real_classes_for_joint:
+    _implied = pd.DataFrame(
+        [
+            {
+                "plate": r["plate"],
+                "well": r["well"],
+                "cell_class": cls,
+                "channel_combo": r["channel_combo"],
+                "compartment_combo": r["compartment_combo"],
+            }
+            for _, r in _joint_rows.iterrows()
+            for cls in _real_classes_for_joint
+        ],
+        columns=["plate", "well", "cell_class", "channel_combo", "compartment_combo"],
+    )
+    split_datasets_combos = (
+        pd.concat(
+            [
+                aggregate_wildcard_combos[aggregate_wildcard_combos["cell_class"] != "joint"],
+                _implied,
+            ],
+            ignore_index=True,
+        )
+        .drop_duplicates(
+            subset=["plate", "well", "cell_class", "channel_combo", "compartment_combo"]
+        )
+        .reset_index(drop=True)
+    )
+else:
+    split_datasets_combos = aggregate_wildcard_combos[
+        aggregate_wildcard_combos["cell_class"] != "joint"
+    ].reset_index(drop=True)
+
 _split_only = {"split_datasets": AGGREGATE_OUTPUTS_FILTERED["split_datasets"]}
 _split_mappings = {"split_datasets": AGGREGATE_OUTPUT_MAPPINGS_FILTERED["split_datasets"]}
 _non_split = {k: v for k, v in AGGREGATE_OUTPUTS_FILTERED.items() if k != "split_datasets"}
@@ -191,7 +237,7 @@ _non_split_mappings = {k: v for k, v in AGGREGATE_OUTPUT_MAPPINGS_FILTERED.items
 
 AGGREGATE_TARGETS_ALL = outputs_to_targets(
     _split_only,
-    aggregate_wildcard_combos[aggregate_wildcard_combos["cell_class"] != "joint"],
+    split_datasets_combos,
     _split_mappings,
 ) + outputs_to_targets(
     _non_split, aggregate_wildcard_combos, _non_split_mappings
