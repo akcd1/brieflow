@@ -140,6 +140,9 @@ def _compute_perturbation_score_joint(
             metadata_cols_local,
             snakemake.params.perturbation_name_col,
             snakemake.params.control_key,
+            perturbation_id_col=snakemake.params.perturbation_id_col,
+            control_name_col=snakemake.params.get("control_name_col"),
+            batch_cols=snakemake.params.batch_cols,
         )
         parts.append(part)
     out = pd.concat(parts, axis=0)
@@ -181,6 +184,9 @@ for i, indices in enumerate(subset_indices):
                 chunk_metadata_cols,
                 snakemake.params.perturbation_name_col,
                 snakemake.params.control_key,
+                perturbation_id_col=snakemake.params.perturbation_id_col,
+                control_name_col=snakemake.params.get("control_name_col"),
+                batch_cols=snakemake.params.batch_cols,
             )
 
     for col in subset_df.columns:
