@@ -248,10 +248,15 @@ cell_classes = [
     c for c in aggregate_wildcard_combos["cell_class"].unique()
     if c != "joint"
 ]
-MONTAGE_TARGETS_ALL = [
-    str(MONTAGE_OUTPUTS["montage_flag"]).format(cell_class=cell_class)
-    for cell_class in cell_classes
-]
+generate_montages = config.get("aggregate", {}).get("generate_montages", True)
+MONTAGE_TARGETS_ALL = (
+    [
+        str(MONTAGE_OUTPUTS["montage_flag"]).format(cell_class=cell_class)
+        for cell_class in cell_classes
+    ]
+    if generate_montages
+    else []
+)
 
 
 # Define bootstrap outputs
