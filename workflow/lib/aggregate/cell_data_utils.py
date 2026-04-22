@@ -234,15 +234,20 @@ def resolve_aggregate_combos(aggregate_combos, second_obj_detection):
     - Dedupes compartments within the combo (preserving order).
     - Validates compartment names, non-empty channels/compartments, and
       second_obj-vs-detection consistency.
-    After normalization, duplicate (channels, compartments) pairs are deduped.
+    - Normalizes the optional `classes` field: if absent or None, stays None (= "apply
+      to every cell_class"); if provided, must be a non-empty list of class-name
+      strings (membership against the run's cell_class universe is checked by the
+      caller, which knows that universe).
+    After normalization, duplicate (channels, compartments, classes) triples are deduped.
 
     Args:
         aggregate_combos (list[dict]): Each dict has "channels" (list[str]) and
-            optionally "compartments" (list[str]).
+            optionally "compartments" (list[str]) and "classes" (list[str]).
         second_obj_detection (bool): From config["phenotype"]["second_obj_detection"].
 
     Returns:
-        list[dict]: Normalized, validated, and de-duplicated combos.
+        list[dict]: Normalized, validated, and de-duplicated combos. Each dict has
+            keys "channels", "compartments", and "classes" (list[str] or None).
 
     Raises:
         ValueError: On any validation failure.
@@ -289,10 +294,30 @@ def resolve_aggregate_combos(aggregate_combos, second_obj_detection):
             if c not in deduped:
                 deduped.append(c)
 
-        key = (tuple(channels), tuple(deduped))
+        classes = combo.get("classes")
+        if classes is not None:
+            if not isinstance(classes, list) or not classes:
+                raise ValueError(
+                    f"AGGREGATE_COMBOS[{idx}] 'classes' must be a non-empty list of "
+                    f"cell_class name strings (or omitted to apply to every class)"
+                )
+            if not all(isinstance(c, str) and c for c in classes):
+                raise ValueError(
+                    f"AGGREGATE_COMBOS[{idx}] 'classes' entries must all be non-empty "
+                    f"strings; got {classes!r}"
+                )
+            classes = list(classes)
+
+        key = (
+            tuple(channels),
+            tuple(deduped),
+            tuple(classes) if classes is not None else None,
+        )
         if key in seen:
             continue
         seen.add(key)
-        resolved.append({"channels": channels, "compartments": deduped})
+        resolved.append(
+            {"channels": channels, "compartments": deduped, "classes": classes}
+        )
 
     return resolved
