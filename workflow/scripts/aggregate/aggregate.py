@@ -25,11 +25,24 @@ del cell_data
 
 is_joint = snakemake.wildcards.cell_class == "joint"
 pert_col = snakemake.params.perturbation_name_col
+control_name_col = snakemake.params.get("control_name_col")
 
 if is_joint:
     group_cols = ["class", pert_col]
 else:
     group_cols = None  # defaults to [pert_col] in aggregate()
+
+# When aggregating by a construct-level ID (e.g. cell_barcode_0) while controls
+# are identified via a different column (e.g. gene_symbol_0), carry the
+# control/gene column through so downstream clustering / benchmarking /
+# annotation merges can match on the human-readable name.
+carry_cols = None
+if (
+    control_name_col
+    and control_name_col != pert_col
+    and control_name_col in metadata.columns
+):
+    carry_cols = [control_name_col]
 
 aggregated_embeddings, aggregated_metadata = aggregate(
     tvn_normalized,
@@ -39,6 +52,7 @@ aggregated_embeddings, aggregated_metadata = aggregate(
     ps_probability_threshold=snakemake.params.ps_probability_threshold,
     ps_percentile_threshold=snakemake.params.ps_percentile_threshold,
     group_cols=group_cols,
+    carry_cols=carry_cols,
 )
 
 feature_columns = [f"PC_{i}" for i in range(tvn_normalized.shape[1])]
