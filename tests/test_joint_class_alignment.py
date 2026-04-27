@@ -124,3 +124,105 @@ def test_aggregate_group_cols_preserves_cell_count():
     )
     assert len(meta) == 2
     assert set(meta["cell_count"]) == {3}
+
+
+from lib.aggregate.align import tvn_on_controls_joint
+
+
+def _make_joint_synthetic(n_per_class=400, n_features=8, seed=0):
+    """Two classes with different baselines and different control covariances.
+
+    - Class A controls: mean=0, isotropic spread.
+    - Class B controls: mean shifted along feature 0, anisotropic spread (3x along feature 1).
+    - Each class has 50% NT controls labelled "nontargeting" and 50% perturbations.
+    - Two batches per class so per-batch CORAL has data.
+    """
+    rng = np.random.default_rng(seed)
+    rows = []
+    feats = []
+    for cls, (mean_shift, scale_y) in [("A", (0.0, 1.0)), ("B", (5.0, 3.0))]:
+        for batch in ["b1", "b2"]:
+            n_ctrl = n_per_class // 4
+            n_pert = n_per_class // 4
+            ctrl = rng.normal(size=(n_ctrl, n_features))
+            ctrl[:, 0] += mean_shift
+            ctrl[:, 1] *= scale_y
+            pert = rng.normal(size=(n_pert, n_features))
+            pert[:, 0] += mean_shift + 2.0  # perturbation effect: shift along feature 0
+            pert[:, 1] *= scale_y
+            feats.append(ctrl)
+            feats.append(pert)
+            rows.extend(
+                [(cls, batch, "nontargeting")] * n_ctrl
+                + [(cls, batch, "g1")] * n_pert
+            )
+    embeddings = np.vstack(feats).astype(np.float64)
+    metadata = pd.DataFrame(rows, columns=["class", "batch_values", "pert"])
+    return embeddings, metadata
+
+
+def test_tvn_on_controls_joint_centers_controls_per_class():
+    embeddings, metadata = _make_joint_synthetic()
+    out = tvn_on_controls_joint(
+        embeddings.copy(), metadata, pert_col="pert",
+        control_key="nontargeting", batch_col="batch_values",
+    )
+    for cls in metadata["class"].unique():
+        cls_mask = (metadata["class"] == cls).to_numpy()
+        ctrl_mask = cls_mask & (metadata["pert"] == "nontargeting").to_numpy()
+        ctrl = out[ctrl_mask]
+        assert np.abs(ctrl.mean(axis=0)).max() < 0.5, (
+            f"class {cls} control mean not centered: {ctrl.mean(axis=0)}"
+        )
+
+
+def test_tvn_on_controls_joint_pooled_controls_centered():
+    embeddings, metadata = _make_joint_synthetic()
+    out = tvn_on_controls_joint(
+        embeddings.copy(), metadata, pert_col="pert",
+        control_key="nontargeting", batch_col="batch_values",
+    )
+    ctrl_mask = (metadata["pert"] == "nontargeting").to_numpy()
+    pooled = out[ctrl_mask]
+    assert np.abs(pooled.mean(axis=0)).max() < 0.5
+
+
+def test_tvn_on_controls_joint_shared_basis_aligns_classes():
+    """After TVN, class-A and class-B controls should overlap (same mean, similar spread)."""
+    embeddings, metadata = _make_joint_synthetic()
+    out = tvn_on_controls_joint(
+        embeddings.copy(), metadata, pert_col="pert",
+        control_key="nontargeting", batch_col="batch_values",
+    )
+    ctrl_a = out[(metadata["class"] == "A") & (metadata["pert"] == "nontargeting")]
+    ctrl_b = out[(metadata["class"] == "B") & (metadata["pert"] == "nontargeting")]
+    mean_diff = np.linalg.norm(ctrl_a.mean(axis=0) - ctrl_b.mean(axis=0))
+    assert mean_diff < 1.0, f"class control means still separated: {mean_diff}"
+    std_a = ctrl_a.std(axis=0)
+    std_b = ctrl_b.std(axis=0)
+    assert np.abs(std_a - std_b).max() < 1.0
+
+
+def test_tvn_on_controls_joint_preserves_row_order():
+    embeddings, metadata = _make_joint_synthetic()
+    out = tvn_on_controls_joint(
+        embeddings.copy(), metadata, pert_col="pert",
+        control_key="nontargeting", batch_col="batch_values",
+    )
+    assert out.shape == embeddings.shape
+
+
+def test_tvn_on_controls_joint_uses_control_col_when_provided():
+    """When control_col is set, it identifies controls; pert_col is used only for labels."""
+    embeddings, metadata = _make_joint_synthetic()
+    metadata = metadata.rename(columns={"pert": "barcode"})
+    metadata["gene"] = metadata["barcode"].replace({"nontargeting": "nontargeting"})
+    metadata.loc[metadata["barcode"] == "g1", "gene"] = "GENE1"
+    out = tvn_on_controls_joint(
+        embeddings.copy(), metadata, pert_col="barcode",
+        control_key="nontargeting", batch_col="batch_values",
+        control_col="gene",
+    )
+    ctrl_mask = (metadata["gene"] == "nontargeting").to_numpy()
+    pooled = out[ctrl_mask]
+    assert np.abs(pooled.mean(axis=0)).max() < 0.5
