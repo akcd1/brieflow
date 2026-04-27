@@ -54,15 +54,26 @@ print(
 use_classifier = snakemake.params.get("use_classifier", False)
 metadata_cols = load_metadata_cols(snakemake.params.metadata_cols_fp, use_classifier)
 
-# Harmonize the pool's column set once: drop cols present in only some per-well
-# files (typically driven by per-well filter decisions diverging when class
-# composition differs across wells) and apply drop_cols_threshold at the pool
-# level — matching the convention used by missing_values_filter.
-kept_metadata_cols, kept_feature_cols, _pool_report = harmonize_pool_schema(
-    non_empty_paths,
-    metadata_cols,
-    drop_cols_threshold=snakemake.params.get("drop_cols_threshold"),
-)
+# Pool-schema handling:
+# - Joint: full harmonize (schema intersection + pool-level drop_cols_threshold),
+#   because joint pools across classes and is more sensitive to pool-level NaN.
+# - Non-joint: intersection only (drop_cols_threshold=None). This is the minimum
+#   needed to prevent cross-well NaN leaking into the PCA sample when per-well
+#   missing_values_filter drops different columns in different wells. Pre-joint
+#   align would crash on such data; this adds no extra cleanup beyond what's
+#   strictly required to keep align from crashing.
+if is_joint:
+    kept_metadata_cols, kept_feature_cols, _pool_report = harmonize_pool_schema(
+        non_empty_paths,
+        metadata_cols,
+        drop_cols_threshold=snakemake.params.get("drop_cols_threshold"),
+    )
+else:
+    kept_metadata_cols, kept_feature_cols, _pool_report = harmonize_pool_schema(
+        non_empty_paths,
+        metadata_cols,
+        drop_cols_threshold=None,
+    )
 scan_cols = kept_metadata_cols + kept_feature_cols
 
 # ---- Step 1: Build PCA ----
@@ -92,16 +103,15 @@ else:
         .to_pandas(use_threads=True, memory_pool=None)
     )
 
-# Residual NaN handling: after pool-level col drops, any remaining NaN is
-# sparse and row-localized. Drop those rows from the PCA training sample so
-# PCA/StandardScaler see a clean matrix. Matches the drop_rows_threshold intent
-# at a per-row granularity appropriate for a training sample.
-_sample_pre = len(sample_df)
-sample_df = sample_df.dropna(subset=kept_feature_cols).reset_index(drop=True)
-if len(sample_df) < _sample_pre:
-    print(
-        f"[pool] dropped {_sample_pre - len(sample_df)} PCA-sample rows with residual NaN"
-    )
+# Residual NaN handling (joint only). Non-joint uses per-batch `.dropna(axis=1)`
+# below, matching pre-joint behavior.
+if is_joint:
+    _sample_pre = len(sample_df)
+    sample_df = sample_df.dropna(subset=kept_feature_cols).reset_index(drop=True)
+    if len(sample_df) < _sample_pre:
+        print(
+            f"[pool] dropped {_sample_pre - len(sample_df)} PCA-sample rows with residual NaN"
+        )
 
 metadata, features = split_cell_data(sample_df, metadata_cols)
 metadata, features = prepare_alignment_data(
@@ -154,19 +164,31 @@ writer = None
 for i, indices in enumerate(subset_indices):
     print(f"Processing subset {i + 1}/{num_align_batches} with {len(indices)} cells")
 
-    subset_df = (
-        cell_dataset.scanner(columns=scan_cols)
-        .take(pa.array(indices))
-        .to_pandas(use_threads=True, memory_pool=None)
-    )
-    # Drop any residual per-row NaN (pool-level col drops above have already
-    # eliminated systematically-missing columns).
-    _pre = len(subset_df)
-    subset_df = subset_df.dropna(subset=kept_feature_cols).reset_index(drop=True)
-    if len(subset_df) < _pre:
-        print(
-            f"[pool] dropped {_pre - len(subset_df)} rows with residual NaN "
-            f"from batch {i + 1}"
+    if is_joint:
+        subset_df = (
+            cell_dataset.scanner(columns=scan_cols)
+            .take(pa.array(indices))
+            .to_pandas(use_threads=True, memory_pool=None)
+        )
+        # Drop residual per-row NaN (pool-level col drops above have already
+        # eliminated systematically-missing columns).
+        _pre = len(subset_df)
+        subset_df = subset_df.dropna(subset=kept_feature_cols).reset_index(drop=True)
+        if len(subset_df) < _pre:
+            print(
+                f"[pool] dropped {_pre - len(subset_df)} rows with residual NaN "
+                f"from batch {i + 1}"
+            )
+    else:
+        # Non-joint: scan the intersected schema. `.dropna(axis=1)` matches the
+        # pre-joint batch loop — it's a no-op when intersection already removed
+        # cross-well divergent cols, but preserves the pre-joint safety net
+        # against any residual NaN.
+        subset_df = (
+            cell_dataset.scanner(columns=scan_cols)
+            .take(pa.array(indices))
+            .to_pandas(use_threads=True, memory_pool=None)
+            .dropna(axis=1)
         )
 
     subset_df["perturbation_score"] = np.nan

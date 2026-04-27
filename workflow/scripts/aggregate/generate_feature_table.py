@@ -38,15 +38,24 @@ cell_dataset = ds.dataset(non_empty_paths, format="parquet")
 use_classifier = snakemake.params.get("use_classifier", False)
 metadata_cols = load_metadata_cols(snakemake.params.metadata_cols_fp, use_classifier)
 
-# Harmonize the pool's column set once: drop cols present in only some per-well
-# files (typically driven by per-well filter decisions diverging when class
-# composition differs across wells) and apply drop_cols_threshold at the pool
-# level — matching the convention used by missing_values_filter.
-existing_metadata_cols, feature_cols, _pool_report = harmonize_pool_schema(
-    non_empty_paths,
-    metadata_cols,
-    drop_cols_threshold=snakemake.params.get("drop_cols_threshold"),
-)
+is_joint = snakemake.wildcards.cell_class == "joint"
+
+# Pool-schema handling (mirrors align.py):
+# - Joint: full harmonize (intersection + drop_cols_threshold).
+# - Non-joint: intersection only. Required to keep the pool free of cross-well
+#   NaN when per-well filter decisions diverge; adds no extra pool-level cleanup.
+if is_joint:
+    existing_metadata_cols, feature_cols, _pool_report = harmonize_pool_schema(
+        non_empty_paths,
+        metadata_cols,
+        drop_cols_threshold=snakemake.params.get("drop_cols_threshold"),
+    )
+else:
+    existing_metadata_cols, feature_cols, _pool_report = harmonize_pool_schema(
+        non_empty_paths,
+        metadata_cols,
+        drop_cols_threshold=None,
+    )
 
 print(
     f"Number of metadata columns: {len(existing_metadata_cols)} | Number of feature columns: {len(feature_cols)}"

@@ -21,6 +21,8 @@ def phate_leiden_pipeline(
     phate_distance_metric,
     first_feature_name="PC_0",
     return_potential=False,
+    perturbation_name_col=None,
+    carry_cols=None,
 ):
     """Run complete PHATE dimensionality reduction and Leiden clustering pipeline.
 
@@ -65,9 +67,15 @@ def phate_leiden_pipeline(
     # Combine metadata with PHATE results
     result_df = pd.concat([aggregated_data[metadata_cols], df_phate], axis=1)
 
-    # Add the first column of df_phate to potential_df in the first position
-    gene_col = result_df.columns[0]
-    potential_df.insert(0, gene_col, result_df[gene_col])
+    gene_col = perturbation_name_col if perturbation_name_col is not None else result_df.columns[0]
+    # Identifier cols carried into potential_df: carry_cols first, then gene_col,
+    # deduped while preserving order. Needed so downstream functions can
+    # (a) merge on composite keys (e.g. joint mode: [class, barcode]) and
+    # (b) identify controls via a column other than gene_col when
+    #     control_name_col != perturbation_name_col.
+    id_cols = list(dict.fromkeys(list(carry_cols or []) + [gene_col]))
+    for i, col in enumerate(id_cols):
+        potential_df.insert(i, col, result_df[col].values)
 
     # sort by cluster
     result_df = result_df.sort_values(by=["cluster"])
@@ -304,64 +312,72 @@ def plot_phate_leiden_clusters(
 
 
 def calculate_potential_to_nontargeting(
-    potential_df, control_key, distance_metric="euclidean", normalize=True
+    potential_df,
+    control_key,
+    perturbation_name_col,
+    distance_metric="euclidean",
+    normalize=True,
+    control_name_col=None,
+    group_cols=None,
 ):
     """Calculate the average distance from each row to nontargeting controls.
 
     Args:
-        potential_df (pd.DataFrame): DataFrame with gene_symbol_0 and potential columns
+        potential_df (pd.DataFrame): DataFrame with perturbation identifier and potential columns
         control_key (str): String pattern used to identify control rows
+        perturbation_name_col (str): Column name holding the perturbation identifier
+            (used as the primary join key of the returned DataFrame).
         distance_metric (str): Distance metric to use (default: 'euclidean')
         normalize (bool): Whether to min-max normalize the distances (default: True)
+        control_name_col (str, optional): Column used to identify controls by
+            `control_key` prefix. Defaults to `perturbation_name_col`. Set this
+            explicitly when aggregating by construct ID (e.g. cell_barcode_0)
+            while controls are named by gene (e.g. gene_symbol_0).
+        group_cols (list[str], optional): Additional key columns to carry into
+            the output (e.g. ["class"] for joint clustering). The returned DF
+            is then uniquely keyed by `group_cols + [perturbation_name_col]`.
 
     Returns:
-        pd.DataFrame: DataFrame with gene_symbol_0, mean_potential_to_nontargeting,
-                      and normalized_potential_to_nontargeting (if normalize=True)
+        pd.DataFrame: DataFrame keyed by group_cols + [perturbation_name_col] with
+                      mean_potential_to_nontargeting (and normalized_* if normalize=True).
     """
     import numpy as np
     from scipy.spatial.distance import pdist, squareform
 
-    # Extract potential columns (all columns except gene_symbol_0)
+    control_name_col = control_name_col or perturbation_name_col
+    group_cols = list(group_cols or [])
+    key_cols = list(dict.fromkeys(group_cols + [perturbation_name_col]))
+
     potential_cols = [
         col for col in potential_df.columns if col.startswith("potential_")
     ]
 
-    # Identify nontargeting control rows
-    nontargeting_mask = potential_df["gene_symbol_0"].str.contains(
+    nontargeting_mask = potential_df[control_name_col].astype(str).str.contains(
         control_key, na=False
     )
     nontargeting_indices = potential_df.index[nontargeting_mask].tolist()
 
-    # Extract only the potential values for calculation
     potential_values = potential_df[potential_cols].values
 
-    # Calculate pairwise distances between all rows
     distances = squareform(pdist(potential_values, metric=distance_metric))
 
-    # Convert to DataFrame for easier indexing
     distance_df = pd.DataFrame(
         distances, index=potential_df.index, columns=potential_df.index
     )
 
-    # For each row, calculate average distance to nontargeting controls
     average_distance = []
     for idx in potential_df.index:
-        gene_symbol = potential_df.loc[idx, "gene_symbol_0"]
-
-        # Get distances from this row to all nontargeting controls
         distances_to_nontargeting = [
             distance_df.loc[idx, control_idx] for control_idx in nontargeting_indices
         ]
 
-        # Calculate average distance
-        avg_distance = np.mean(distances_to_nontargeting)
-
-        average_distance.append(
-            {
-                "gene_symbol_0": gene_symbol,
-                "mean_potential_to_nontargeting": avg_distance,
-            }
+        avg_distance = (
+            np.mean(distances_to_nontargeting) if distances_to_nontargeting else np.nan
         )
+
+        row = {k: potential_df.loc[idx, k] for k in key_cols}
+        row["mean_potential_to_nontargeting"] = avg_distance
+        average_distance.append(row)
 
     # Create result DataFrame
     average_distance_df = pd.DataFrame(average_distance)

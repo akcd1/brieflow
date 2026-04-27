@@ -34,12 +34,27 @@ if snakemake.params.perturbation_auc_threshold is not None:
         )
     ]
 
+perturbation_name_col = snakemake.params.perturbation_name_col
+control_name_col = snakemake.params.get("control_name_col") or perturbation_name_col
+
+# Joint clustering: aggregated_data has one row per (class, perturbation). Carry
+# `class` into potential_df so the composite key is preserved downstream.
+# Also carry control_name_col when it differs from perturbation_name_col, so
+# controls can be identified by gene name while aggregation is by construct.
+is_joint = "class" in aggregated_data.columns
+group_cols = ["class"] if is_joint else []
+carry_cols = list(group_cols)
+if control_name_col != perturbation_name_col:
+    carry_cols.append(control_name_col)
+
 # cluster aggregated data
 phate_leiden_clustering, potential_df = phate_leiden_pipeline(
     aggregated_data,
     int(snakemake.params.leiden_resolution),
     snakemake.params.phate_distance_metric,
     return_potential=True,
+    perturbation_name_col=perturbation_name_col,
+    carry_cols=carry_cols,
 )
 
 # add uniprot information
@@ -66,19 +81,25 @@ uniprot_data = expanded_df.sort_values(["gene_name", "position"]).drop_duplicate
 uniprot_data = uniprot_data[
     ["gene_name", "uniprot_entry", "uniprot_function", "uniprot_link"]
 ]
-# merge uniprot data with clustering results
-phate_leiden_clustering = phate_leiden_clustering.merge(
-    uniprot_data, how="left", left_on="gene_symbol_0", right_on="gene_name"
-).drop(columns="gene_name")
+# merge uniprot data with clustering results (only when gene symbols are available)
+if "gene_symbol_0" in phate_leiden_clustering.columns:
+    phate_leiden_clustering = phate_leiden_clustering.merge(
+        uniprot_data, how="left", left_on="gene_symbol_0", right_on="gene_name"
+    ).drop(columns="gene_name")
 
 # calculate potential to nontargeting
 average_distance_df = calculate_potential_to_nontargeting(
-    potential_df, snakemake.params.control_key
+    potential_df,
+    snakemake.params.control_key,
+    perturbation_name_col,
+    control_name_col=control_name_col,
+    group_cols=group_cols,
 )
 
-# merge clustering data with potential_df
+# merge clustering data with potential_df on the composite key when joint
+merge_keys = list(dict.fromkeys(group_cols + [perturbation_name_col]))
 phate_leiden_clustering = phate_leiden_clustering.merge(
-    average_distance_df, how="left", left_on="gene_symbol_0", right_on="gene_symbol_0"
+    average_distance_df, how="left", on=merge_keys
 )
 
 # save clustering results
