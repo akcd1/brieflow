@@ -210,6 +210,136 @@ def tvn_on_controls(
     return embeddings
 
 
+def tvn_on_controls_joint(
+    embeddings: np.ndarray,
+    metadata: pd.DataFrame,
+    pert_col: str,
+    control_key: str,
+    batch_col: str,
+    control_col: str | None = None,
+) -> np.ndarray:
+    """Joint-mode TVN with shared rotation and target covariance across classes.
+
+    Differs from `tvn_on_controls` in that the PCA rotation and CORAL target
+    covariance are computed once over controls pooled across classes, while
+    centering, scaling, and CORAL whitening remain per-class. This puts every
+    class in a shared basis with co-centered nontargeting controls, so a
+    perturbation's morphological displacement is comparable across classes.
+
+    Requires `metadata` to contain a "class" column.
+
+    Args:
+        embeddings: Embeddings to align, shape (n_cells, n_features).
+        metadata: Metadata aligned with `embeddings` rows. Must contain "class",
+            `pert_col`, `batch_col`, and (if provided) `control_col`.
+        pert_col: Column name with perturbation labels.
+        control_key: Prefix marking control rows in the lookup column.
+        batch_col: Column name with batch labels.
+        control_col: Column to use for identifying controls. When None, uses
+            `pert_col`.
+
+    Returns:
+        np.ndarray of aligned embeddings, same shape as input. Row order preserved.
+    """
+    lookup_col = control_col if control_col is not None else pert_col
+    classes = metadata["class"].unique()
+    n_features = embeddings.shape[1]
+
+    # ---- Step 1: per-class center+scale on controls (no batch) ----
+    for cls in classes:
+        cls_mask = (metadata["class"] == cls).to_numpy()
+        cls_meta = metadata.loc[cls_mask]
+        if cls_meta[lookup_col].astype(str).str.startswith(control_key).sum() == 0:
+            print(
+                f"Warning: class {cls} has no controls; skipping per-class centerscale"
+            )
+            continue
+        embeddings[cls_mask] = centerscale_on_controls(
+            embeddings[cls_mask],
+            cls_meta,
+            pert_col,
+            control_key,
+            control_col=lookup_col,
+        )
+
+    # ---- Step 2: shared PCA rotation fit on pooled controls ----
+    ctrl_mask_all = (
+        metadata[lookup_col].astype(str).str.startswith(control_key).to_numpy()
+    )
+    n_pooled = int(ctrl_mask_all.sum())
+    if n_pooled == 0:
+        print("Warning: no controls in any class; skipping joint TVN rotation/CORAL")
+        return embeddings
+    embeddings = PCA().fit(embeddings[ctrl_mask_all]).transform(embeddings)
+
+    # ---- Step 3: per-class, per-batch center+scale on controls ----
+    for cls in classes:
+        cls_mask = (metadata["class"] == cls).to_numpy()
+        cls_meta = metadata.loc[cls_mask]
+        if cls_meta[lookup_col].astype(str).str.startswith(control_key).sum() == 0:
+            continue
+        embeddings[cls_mask] = centerscale_on_controls(
+            embeddings[cls_mask],
+            cls_meta,
+            pert_col,
+            control_key,
+            batch_col=batch_col,
+            control_col=lookup_col,
+        )
+
+    # ---- Step 4: shared target covariance from pooled post-step-3 controls ----
+    target_cov = np.cov(embeddings[ctrl_mask_all], rowvar=False, ddof=1) + 0.5 * np.eye(
+        n_features
+    )
+    target_cov_sqrt = linalg.fractional_matrix_power(target_cov, 0.5)
+
+    # ---- Step 5: per-(class, batch) CORAL to shared target ----
+    for cls in classes:
+        cls_mask = (metadata["class"] == cls).to_numpy()
+        for batch in metadata.loc[cls_mask, batch_col].unique():
+            sel = cls_mask & (metadata[batch_col] == batch).to_numpy()
+            sel_ctrl = sel & ctrl_mask_all
+            n_ctrl = int(sel_ctrl.sum())
+            if n_ctrl < n_features:
+                print(
+                    f"Warning: class={cls} batch={batch} has {n_ctrl} controls "
+                    f"(< {n_features} features), skipping CORAL"
+                )
+                continue
+            source_cov = np.cov(
+                embeddings[sel_ctrl], rowvar=False, ddof=1
+            ) + 0.5 * np.eye(n_features)
+            source_cov_inv_sqrt = linalg.fractional_matrix_power(source_cov, -0.5)
+            if not np.all(np.isfinite(source_cov_inv_sqrt)):
+                print(
+                    f"Warning: class={cls} batch={batch} has singular covariance, "
+                    f"skipping CORAL"
+                )
+                continue
+            embeddings[sel] = embeddings[sel] @ source_cov_inv_sqrt @ target_cov_sqrt
+
+    # ---- Diagnostics: per-class and pooled control stats ----
+    for cls in classes:
+        cls_mask = (metadata["class"] == cls).to_numpy()
+        ctrl_local = ctrl_mask_all & cls_mask
+        if ctrl_local.sum() == 0:
+            continue
+        cm = embeddings[ctrl_local].mean(axis=0)
+        cs = embeddings[ctrl_local].std(axis=0)
+        print(
+            f"[JOINT TVN] class={cls} controls={int(ctrl_local.sum())} "
+            f"mean_abs(mean)={np.abs(cm).mean():.4f} mean(std)={cs.mean():.4f}"
+        )
+    pooled = embeddings[ctrl_mask_all]
+    print(
+        f"[JOINT TVN] pooled controls={n_pooled} "
+        f"mean_abs(mean)={np.abs(pooled.mean(axis=0)).mean():.4f} "
+        f"mean(std)={pooled.std(axis=0).mean():.4f}"
+    )
+
+    return embeddings
+
+
 def centerscale_by_batch(
     features: np.ndarray, metadata: pd.DataFrame = None, batch_col: str | None = None
 ) -> np.ndarray:

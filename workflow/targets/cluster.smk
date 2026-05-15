@@ -121,8 +121,25 @@ CLUSTER_OUTPUT_MAPPINGS = {
 #     & (cluster_wildcard_combos["leiden_resolution"].isin([13]))
 # ]
 
-CLUSTER_OUTPUTS_MAPPED = map_outputs(CLUSTER_OUTPUTS, CLUSTER_OUTPUT_MAPPINGS)
+# Determine which outputs to include based on config. Default True for
+# backwards compatibility — existing configs without the flag keep benchmarking.
+CLUSTER_RUN_BENCHMARK = config["cluster"].get("run_benchmark", True)
+
+if not CLUSTER_RUN_BENCHMARK:
+    CLUSTER_OUTPUTS_FILTERED = {
+        k: v for k, v in CLUSTER_OUTPUTS.items() if k != "benchmark_clusters"
+    }
+    CLUSTER_OUTPUT_MAPPINGS_FILTERED = {
+        k: v for k, v in CLUSTER_OUTPUT_MAPPINGS.items() if k != "benchmark_clusters"
+    }
+else:
+    CLUSTER_OUTPUTS_FILTERED = CLUSTER_OUTPUTS
+    CLUSTER_OUTPUT_MAPPINGS_FILTERED = CLUSTER_OUTPUT_MAPPINGS
+
+CLUSTER_OUTPUTS_MAPPED = map_outputs(
+    CLUSTER_OUTPUTS_FILTERED, CLUSTER_OUTPUT_MAPPINGS_FILTERED
+)
 
 CLUSTER_TARGETS_ALL = outputs_to_targets(
-    CLUSTER_OUTPUTS, cluster_wildcard_combos, CLUSTER_OUTPUT_MAPPINGS
+    CLUSTER_OUTPUTS_FILTERED, cluster_wildcard_combos, CLUSTER_OUTPUT_MAPPINGS_FILTERED
 )

@@ -15,6 +15,7 @@ from lib.aggregate.align import (
     prepare_alignment_data,
     centerscale_by_batch,
     tvn_on_controls,
+    tvn_on_controls_joint,
     stratified_subsample,
 )
 from lib.aggregate.filter import harmonize_pool_schema
@@ -232,41 +233,14 @@ for i, indices in enumerate(subset_indices):
     features = pca.transform(features)
 
     if is_joint:
-        # Per-class TVN: split by class, TVN each with its own controls, concat in order.
-        aligned_features = np.empty_like(features)
-        for cls in metadata["class"].unique():
-            cls_mask = (metadata["class"] == cls).to_numpy()
-            cls_meta = metadata.loc[cls_mask].reset_index(drop=True)
-            cls_emb = features[cls_mask]
-            cls_emb = tvn_on_controls(
-                cls_emb,
-                cls_meta,
-                snakemake.params.perturbation_name_col,
-                snakemake.params.control_key,
-                "batch_values",
-                control_col=snakemake.params.get("control_name_col"),
-            )
-            aligned_features[cls_mask] = cls_emb
-
-            # Diagnostic: per-class control mean/std per PC after TVN
-            lookup_col = (
-                snakemake.params.get("control_name_col")
-                or snakemake.params.perturbation_name_col
-            )
-            ctrl_mask_local = (
-                cls_meta[lookup_col]
-                .astype(str)
-                .str.startswith(snakemake.params.control_key)
-                .to_numpy()
-            )
-            if ctrl_mask_local.sum() > 0:
-                ctrl_mean = cls_emb[ctrl_mask_local].mean(axis=0)
-                ctrl_std = cls_emb[ctrl_mask_local].std(axis=0)
-                print(
-                    f"[JOINT TVN] class={cls} controls={int(ctrl_mask_local.sum())} "
-                    f"mean_abs(mean)={np.abs(ctrl_mean).mean():.4f} mean(std)={ctrl_std.mean():.4f}"
-                )
-        features = aligned_features
+        features = tvn_on_controls_joint(
+            features,
+            metadata,
+            snakemake.params.perturbation_name_col,
+            snakemake.params.control_key,
+            "batch_values",
+            control_col=snakemake.params.get("control_name_col"),
+        )
     else:
         features = tvn_on_controls(
             features,
