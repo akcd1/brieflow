@@ -337,3 +337,101 @@ def intensity_filter(
     return metadata[mask == 1].reset_index(drop=True), features[mask == 1].reset_index(
         drop=True
     )
+
+
+def _degeneracy_stats(values: np.ndarray) -> tuple[float, int, float]:
+    """Return (freq_ratio, n_unique, variance) for a 1-D array, NaNs dropped.
+
+    freq_ratio = count(2nd-most-common value) / count(most-common value);
+    ~0 for a near-constant feature, ~1 for an all-distinct feature.
+
+    Note: this is the *inverse* of caret's nearZeroVar freqRatio, which uses
+    most/second-most. Here second/most means freq_ratio ≈ 0 for near-constant
+    features and the gate ``fr < freq_cut`` is equivalent to caret's
+    ``freqRatio > 1/freq_cut``. With the default freq_cut=0.05 this corresponds
+    to caret's default threshold of 20.
+    """
+    v = values[~np.isnan(values)]
+    if v.size == 0:
+        return 0.0, 0, 0.0
+    u, counts = np.unique(v, return_counts=True)
+    if counts.size == 1:
+        freq_ratio = 0.0
+    else:
+        counts_sorted = np.sort(counts)
+        freq_ratio = float(counts_sorted[-2]) / float(counts_sorted[-1])
+    variance = float(v.var(ddof=1)) if v.size > 1 else 0.0
+    return freq_ratio, int(u.size), variance
+
+
+def degeneracy_keep_list(
+    features: pd.DataFrame,
+    classes: pd.Series,
+    freq_cut: float = 0.05,
+    unique_count_floor: int = 100,
+    var_floor: float = 1e-8,
+    min_cells: int = 20,
+) -> tuple[list, dict]:
+    """Compute the kept feature columns under the per-class keep-if-any rule.
+
+    A feature is *degenerate* in a class if ANY of:
+      - freq_ratio < freq_cut          (near-constant)
+      - n_unique  < unique_count_floor (too few distinct values)
+      - variance  < var_floor          (near-dead)
+
+    ``unique_count_floor`` is a RAW ABSOLUTE count of distinct values — a feature
+    is dropped when n_unique < unique_count_floor, regardless of class size.
+    A fractional threshold (e.g. n_unique/n_rows < k) misfires at single-cell
+    scale (~1e6 rows) where even a two-value binary column would trivially pass.
+
+    Keep-if-any: a feature is dropped only if degenerate in EVERY qualifying class
+    (classes with >= min_cells rows). If no class qualifies, the whole pool is used
+    as a single group. The returned drop list is meant to be applied uniformly so
+    every cell keeps the identical feature set.
+
+    Args:
+        features: DataFrame of numeric feature columns only.
+        classes: Series of per-row class labels, aligned to `features` rows.
+        freq_cut, unique_count_floor, var_floor, min_cells: gate thresholds.
+
+    Returns:
+        (kept_feature_cols: list[str], report: dict)
+    """
+    feature_cols = list(features.columns)
+    classes = classes.reset_index(drop=True)
+    feats = features.reset_index(drop=True)
+
+    counts = classes.value_counts()
+    qualifying = [c for c in counts.index if counts[c] >= min_cells]
+    if qualifying:
+        groups = {c: (classes == c).to_numpy() for c in qualifying}
+    else:
+        groups = {"__pool__": np.ones(len(feats), dtype=bool)}
+
+    # Counts ALL columns flagged degenerate per class, including ones ultimately
+    # KEPT by the keep-if-any rule — it is NOT the per-class dropped count.
+    per_class_degenerate = {g: 0 for g in groups}
+    dropped = []
+    for col in feature_cols:
+        col_vals = feats[col].to_numpy(dtype="float64")
+        deg_flags = []
+        for g, mask in groups.items():
+            fr, nu, var = _degeneracy_stats(col_vals[mask])
+            is_deg = (fr < freq_cut) or (nu < unique_count_floor) or (var < var_floor)
+            if is_deg:
+                per_class_degenerate[g] += 1
+            deg_flags.append(is_deg)
+        if all(deg_flags):  # degenerate in EVERY qualifying class
+            dropped.append(col)
+
+    dropped_set = set(dropped)
+    kept = [c for c in feature_cols if c not in dropped_set]
+    report = {
+        "n_features": len(feature_cols),
+        "n_kept": len(kept),
+        "n_dropped": len(dropped),
+        "dropped": dropped,
+        "per_class_degenerate": per_class_degenerate,
+        "qualifying_classes": list(groups.keys()),
+    }
+    return kept, report
