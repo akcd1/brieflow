@@ -15,6 +15,23 @@ CLUSTER_OUTPUTS = {
         / "{cell_class}"
         / get_filename({}, "aggregate_cleaned", "tsv"),
     ],
+    # Higher-dimensional (50-D) PHATE embedding for point-to-point distance
+    # measurement in the same diffusion space the clustering uses (identical PHATE
+    # settings, just 50 output coordinates instead of 2). JOINT only (the joint
+    # aggregate is the shared clustering space) and independent of leiden_resolution.
+    # Row order matches the row-ids file (class:cell_barcode_0).
+    "phate_diff_embedding": [
+        CLUSTER_FP
+        / "{channel_combo}"
+        / "{compartment_combo}"
+        / "joint"
+        / get_filename({}, "phate_int50", "npy"),
+        CLUSTER_FP
+        / "{channel_combo}"
+        / "{compartment_combo}"
+        / "joint"
+        / get_filename({}, "phate_int50_row_ids", "txt"),
+    ],
     "phate_leiden_clustering": [
         CLUSTER_FP
         / "{channel_combo}"
@@ -109,6 +126,7 @@ CLUSTER_OUTPUTS = {
 
 CLUSTER_OUTPUT_MAPPINGS = {
     "clean_aggregate": None,
+    "phate_diff_embedding": None,
     "phate_leiden_clustering": None,
     "benchmark_clusters": None,
 }

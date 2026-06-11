@@ -11,6 +11,22 @@ rule clean_aggregate:
         "../scripts/cluster/clean_aggregate.py"
 
 
+# higher-dimensional PHATE embedding (same diffusion space as clustering) for
+# point-to-point distance measurement; JOINT only, independent of leiden_resolution
+rule phate_diff_embedding:
+    input:
+        # joint cleaned aggregate (cell_class fixed to "joint"); channel_combo /
+        # compartment_combo remain wildcards, inferred from the output path.
+        str(CLUSTER_OUTPUTS["clean_aggregate"][0]).replace("{cell_class}", "joint"),
+    output:
+        CLUSTER_OUTPUTS_MAPPED["phate_diff_embedding"],
+    params:
+        phate_distance_metric=config["cluster"]["phate_distance_metric"],
+        n_components=config["cluster"].get("phate_diff_embedding_dim", 50),
+    script:
+        "../scripts/cluster/phate_diff_embedding.py"
+
+
 # perform phate embedding and leiden clustering
 rule phate_leiden_clustering:
     input:

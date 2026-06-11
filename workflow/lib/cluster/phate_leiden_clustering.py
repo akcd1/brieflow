@@ -117,14 +117,19 @@ def run_phate(
         knn=knn,
         knn_dist=metric,
         verbose=False,
+        **kwargs,
     )
 
     # Transform data
     X_phate = p.fit_transform(feature_selected_data.values)
 
-    # Create output DataFrame
+    # Create output DataFrame. Column names follow the embedding dimensionality
+    # (PHATE_0..PHATE_{k-1}); the default n_components=2 yields PHATE_0, PHATE_1 as
+    # before, while a higher n_components (passed via kwargs) names all columns.
     df_phate = pd.DataFrame(
-        X_phate, index=feature_selected_data.index, columns=["PHATE_0", "PHATE_1"]
+        X_phate,
+        index=feature_selected_data.index,
+        columns=[f"PHATE_{i}" for i in range(X_phate.shape[1])],
     )
 
     return df_phate, p
