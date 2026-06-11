@@ -92,6 +92,21 @@ AGGREGATE_OUTPUTS = {
             "aligned",
             "parquet",
         ),
+        # Degeneracy keep-list sidecar (one row per candidate feature, kept flag).
+        # Written by align.py whether or not the degeneracy filter is enabled, so it
+        # is always a valid output; consumed downstream by the contrast analysis
+        # (cluster_point_contrast) to restrict features to the clustering's set.
+        AGGREGATE_FP
+        / "parquets"
+        / get_filename(
+            {
+                "cell_class": "{cell_class}",
+                "channel_combo": "{channel_combo}",
+                "compartment_combo": "{compartment_combo}",
+            },
+            "degeneracy_features",
+            "tsv",
+        ),
     ],
     "aggregate": [
         AGGREGATE_FP

@@ -44,6 +44,9 @@ non_empty_paths = [
 if len(non_empty_paths) == 0:
     print("WARNING: No cells in input, writing empty output")
     pq.write_table(pa.table({}), snakemake.output[0])
+    pd.DataFrame({"feature": [], "kept": []}).to_csv(
+        snakemake.output[1], sep="\t", index=False
+    )
     exit(0)
 
 cell_dataset = ds.dataset(non_empty_paths, format="parquet")
@@ -116,6 +119,9 @@ if is_joint:
 
 metadata, features = split_cell_data(sample_df, metadata_cols)
 
+# Full candidate feature set before any degeneracy pruning (recorded in the sidecar).
+all_feature_cols = list(kept_feature_cols)
+
 # ---- Degeneracy feature filter (global keep-if-any, applied before PCA) ----
 # Decided once on the class-stratified PCA sample, then propagated to the batch
 # loop via kept_feature_cols/scan_cols so every cell keeps the identical set.
@@ -149,6 +155,18 @@ if degeneracy_cfg.get("enabled", False):
         )
     features = features[kept_feature_cols]
     scan_cols = kept_metadata_cols + kept_feature_cols
+
+# ---- Persist degeneracy keep-list sidecar (always written; declared output) ----
+# One row per candidate feature with a kept flag. When the filter is disabled every
+# feature is kept. Consumed by the contrast analysis (cluster_point_contrast) to
+# restrict features to exactly the set the clustering used.
+_kept_set = set(kept_feature_cols)
+pd.DataFrame(
+    {
+        "feature": all_feature_cols,
+        "kept": [f in _kept_set for f in all_feature_cols],
+    }
+).to_csv(snakemake.output[1], sep="\t", index=False)
 
 metadata, features = prepare_alignment_data(
     metadata,
