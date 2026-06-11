@@ -18,7 +18,7 @@ from lib.aggregate.align import (
     tvn_on_controls_joint,
     stratified_subsample,
 )
-from lib.aggregate.filter import harmonize_pool_schema
+from lib.aggregate.filter import harmonize_pool_schema, degeneracy_keep_list
 from lib.aggregate.perturbation_score import perturbation_score
 
 warnings.filterwarnings(
@@ -115,6 +115,41 @@ if is_joint:
         )
 
 metadata, features = split_cell_data(sample_df, metadata_cols)
+
+# ---- Degeneracy feature filter (global keep-if-any, applied before PCA) ----
+# Decided once on the class-stratified PCA sample, then propagated to the batch
+# loop via kept_feature_cols/scan_cols so every cell keeps the identical set.
+degeneracy_cfg = snakemake.params.get("degeneracy_filter") or {}
+if degeneracy_cfg.get("enabled", False):
+    classes_for_deg = (
+        metadata["class"]
+        if "class" in metadata.columns
+        else pd.Series("__all__", index=metadata.index)
+    )
+    keep_cols, deg_report = degeneracy_keep_list(
+        features,
+        classes_for_deg,
+        freq_cut=degeneracy_cfg.get("freq_cut", 0.05),
+        unique_count_floor=degeneracy_cfg.get("unique_count_floor", 100),
+        var_floor=degeneracy_cfg.get("var_floor", 1e-8),
+        min_cells=degeneracy_cfg.get("min_cells", 20),
+    )
+    print(
+        f"[degeneracy] dropping {deg_report['n_dropped']} of "
+        f"{deg_report['n_features']} features "
+        f"(per-class degenerate: {deg_report['per_class_degenerate']})"
+    )
+    keep_set = set(keep_cols)
+    kept_feature_cols = [c for c in kept_feature_cols if c in keep_set]
+    if not kept_feature_cols:
+        raise ValueError(
+            "[degeneracy] all feature columns were dropped; check "
+            "freq_cut/unique_count_floor/var_floor thresholds or the input data "
+            f"(n_features={deg_report['n_features']})"
+        )
+    features = features[kept_feature_cols]
+    scan_cols = kept_metadata_cols + kept_feature_cols
+
 metadata, features = prepare_alignment_data(
     metadata,
     features,

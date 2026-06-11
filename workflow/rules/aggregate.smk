@@ -161,6 +161,7 @@ rule align:
         skip_perturbation_score=config["aggregate"]["skip_perturbation_score"],
         control_name_col=config["aggregate"].get("control_name_col"),
         drop_cols_threshold=config["aggregate"].get("drop_cols_threshold"),
+        degeneracy_filter=config["aggregate"].get("degeneracy_filter", {}),
     script:
         "../scripts/aggregate/align.py"
 
