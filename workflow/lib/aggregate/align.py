@@ -321,6 +321,20 @@ def tvn_on_controls_joint(
         return embeddings
     embeddings = PCA().fit(embeddings[ctrl_mask_all]).transform(embeddings)
 
+    def _worst_ctrl_median() -> float:
+        """Largest per-(class, batch) control componentwise |median| (diagnostic)."""
+        worst = 0.0
+        for c in classes:
+            cmask = (metadata["class"] == c).to_numpy()
+            for b in metadata.loc[cmask, batch_col].unique():
+                s = cmask & (metadata[batch_col] == b).to_numpy() & ctrl_mask_all
+                if s.sum() == 0:
+                    continue
+                worst = max(
+                    worst, float(np.abs(np.median(embeddings[s], axis=0)).max())
+                )
+        return worst
+
     # ---- Step 3: per-class, per-batch center+scale on controls ----
     for cls in classes:
         cls_mask = (metadata["class"] == cls).to_numpy()
@@ -335,6 +349,11 @@ def tvn_on_controls_joint(
             batch_col=batch_col,
             method=method,
             control_col=lookup_col,
+        )
+
+    if method == "mad":
+        print(
+            f"[JOINT TVN] worst (class,batch) ctrl |median| after step 3 (pre-CORAL): {_worst_ctrl_median():.4f}"
         )
 
     # ---- Step 4: shared target covariance from pooled post-step-3 controls ----
@@ -367,6 +386,34 @@ def tvn_on_controls_joint(
                 )
                 continue
             embeddings[sel] = embeddings[sel] @ source_cov_inv_sqrt @ target_cov_sqrt
+
+    # ---- Step 6: post-CORAL per-(class, batch) median re-center on controls ----
+    # CORAL (step 5) is a linear reshape that does NOT preserve the componentwise
+    # median, so median centering done before CORAL (steps 1/3) leaks back into a
+    # nonzero control median. For method="mad" we re-center each (class, batch) on
+    # its control median AFTER CORAL. This is a pure translation, so it preserves
+    # CORAL's covariance alignment while placing the post-TVN control *median* — the
+    # statistic median aggregation uses — at the origin. Skipped for "standard":
+    # CORAL already preserves the mean=0 set in step 3, so this would be a no-op.
+    if method == "mad":
+        print(
+            f"[JOINT TVN] worst (class,batch) ctrl |median| after CORAL (pre step 6): "
+            f"{_worst_ctrl_median():.4f}"
+        )
+        for cls in classes:
+            cls_mask = (metadata["class"] == cls).to_numpy()
+            for batch in metadata.loc[cls_mask, batch_col].unique():
+                sel = cls_mask & (metadata[batch_col] == batch).to_numpy()
+                sel_ctrl = sel & ctrl_mask_all
+                if sel_ctrl.sum() == 0:
+                    continue
+                embeddings[sel] = embeddings[sel] - np.median(
+                    embeddings[sel_ctrl], axis=0
+                )
+        print(
+            f"[JOINT TVN] worst (class,batch) ctrl |median| after step 6: "
+            f"{_worst_ctrl_median():.4f}"
+        )
 
     # ---- Diagnostics: per-class and pooled control stats ----
     for cls in classes:

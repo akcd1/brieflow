@@ -368,3 +368,63 @@ def test_tvn_on_controls_mad_centers_control_median():
     med_mad = float(np.abs(np.median(out_mad[ctrl], axis=0)).max())
     assert med_mad < med_std, f"mad median {med_mad:.3f} not < std median {med_std:.3f}"
     assert med_mad < 0.2, f"mad control median not ~0: {med_mad:.3f}"
+
+
+def _make_skewed_heterocov_joint(seed=0, n_features=4):
+    """Skewed controls whose per-(class, batch) covariance DIFFERS across groups.
+
+    CORAL must do non-trivial whitening here, so centering the control median
+    *before* CORAL (steps 1/3) leaks: CORAL's linear reshape moves the median back.
+    This is the regime where a post-CORAL median re-center (step 6) is required.
+    """
+    rng = np.random.default_rng(seed)
+    rows, feats = [], []
+    for cls in ("A", "B"):
+        for batch in ("b1", "b2"):
+            n_ctrl, n_pert = 1200, 300
+            base = (
+                rng.exponential(1.0, size=(n_ctrl, n_features)) - 1.0
+            )  # skewed, mean 0
+            # group-specific mixing -> distinct covariance per (class, batch)
+            mix = np.eye(n_features) + 0.4 * rng.standard_normal(
+                (n_features, n_features)
+            )
+            ctrl = base @ mix
+            pert = (rng.exponential(1.0, size=(n_pert, n_features)) - 1.0) @ mix
+            pert[:, 0] += 2.0
+            feats += [ctrl, pert]
+            rows += [(cls, batch, "nontargeting")] * n_ctrl + [
+                (cls, batch, "g1")
+            ] * n_pert
+    embeddings = np.vstack(feats)
+    metadata = pd.DataFrame(rows, columns=["class", "batch_values", "pert"])
+    return embeddings, metadata
+
+
+def _worst_group_control_median(out, metadata):
+    ctrl = metadata["pert"].str.startswith("nontargeting").to_numpy()
+    worst = 0.0
+    for _, idx in metadata.groupby(["class", "batch_values"]).groups.items():
+        m = np.zeros(len(metadata), dtype=bool)
+        m[idx] = True
+        med = np.median(out[m & ctrl], axis=0)
+        worst = max(worst, float(np.abs(med).max()))
+    return worst
+
+
+def test_tvn_joint_mad_zeroes_per_group_control_median_after_coral():
+    """method='mad' must drive each (class, batch) control MEDIAN to ~0 even when
+    CORAL is non-trivial — i.e. re-centered AFTER CORAL, not just before it."""
+    emb, meta = _make_skewed_heterocov_joint()
+    out = tvn_on_controls_joint(
+        emb.copy(),
+        meta,
+        pert_col="pert",
+        control_key="nontargeting",
+        batch_col="batch_values",
+        method="mad",
+    )
+    worst = _worst_group_control_median(out, meta)
+    assert worst < 0.05, (
+        f"per-(class,batch) control median not ~0 after CORAL: {worst:.3f}"
+    )
