@@ -210,6 +210,32 @@ def tvn_on_controls(
     return embeddings
 
 
+def validate_joint_align_config(is_joint: bool, num_align_batches: int) -> None:
+    """Validate align configuration for joint mode.
+
+    Joint TVN (`tvn_on_controls_joint`) fits its shared PCA rotation and shared
+    target covariance on the controls present in each align chunk. With more
+    than one chunk those quantities are fit on random, disjoint control subsets,
+    so each chunk lands in a different basis and the per-class control clouds are
+    no longer comparable across chunks. Raise rather than emit that corruption
+    silently.
+
+    Args:
+        is_joint: Whether this is a joint (multi-class) align run.
+        num_align_batches: Number of align chunks the script will process.
+
+    Raises:
+        ValueError: If joint mode is requested with more than one align chunk.
+    """
+    if is_joint and num_align_batches > 1:
+        raise ValueError(
+            f"num_align_batches={num_align_batches} is invalid in joint mode: "
+            "TVN's shared rotation and target covariance are fit per chunk, so "
+            ">1 chunk yields a fragmented, non-comparable embedding. Set "
+            "num_align_batches=1 for joint cell_class."
+        )
+
+
 def tvn_on_controls_joint(
     embeddings: np.ndarray,
     metadata: pd.DataFrame,

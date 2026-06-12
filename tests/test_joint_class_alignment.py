@@ -126,6 +126,24 @@ def test_aggregate_group_cols_preserves_cell_count():
     assert set(meta["cell_count"]) == {3}
 
 
+from lib.aggregate.align import validate_joint_align_config
+
+
+def test_validate_joint_align_config_rejects_multi_chunk_joint():
+    with pytest.raises(ValueError, match="num_align_batches=2 is invalid in joint"):
+        validate_joint_align_config(is_joint=True, num_align_batches=2)
+
+
+def test_validate_joint_align_config_allows_single_chunk_joint():
+    # No raise expected.
+    validate_joint_align_config(is_joint=True, num_align_batches=1)
+
+
+def test_validate_joint_align_config_allows_multi_chunk_non_joint():
+    # Non-joint may chunk freely; the per-chunk TVN concern is joint-only.
+    validate_joint_align_config(is_joint=False, num_align_batches=8)
+
+
 from lib.aggregate.align import tvn_on_controls_joint
 
 
@@ -153,8 +171,7 @@ def _make_joint_synthetic(n_per_class=400, n_features=8, seed=0):
             feats.append(ctrl)
             feats.append(pert)
             rows.extend(
-                [(cls, batch, "nontargeting")] * n_ctrl
-                + [(cls, batch, "g1")] * n_pert
+                [(cls, batch, "nontargeting")] * n_ctrl + [(cls, batch, "g1")] * n_pert
             )
     embeddings = np.vstack(feats).astype(np.float64)
     metadata = pd.DataFrame(rows, columns=["class", "batch_values", "pert"])
@@ -164,8 +181,11 @@ def _make_joint_synthetic(n_per_class=400, n_features=8, seed=0):
 def test_tvn_on_controls_joint_centers_controls_per_class():
     embeddings, metadata = _make_joint_synthetic()
     out = tvn_on_controls_joint(
-        embeddings.copy(), metadata, pert_col="pert",
-        control_key="nontargeting", batch_col="batch_values",
+        embeddings.copy(),
+        metadata,
+        pert_col="pert",
+        control_key="nontargeting",
+        batch_col="batch_values",
     )
     for cls in metadata["class"].unique():
         cls_mask = (metadata["class"] == cls).to_numpy()
@@ -179,8 +199,11 @@ def test_tvn_on_controls_joint_centers_controls_per_class():
 def test_tvn_on_controls_joint_pooled_controls_centered():
     embeddings, metadata = _make_joint_synthetic()
     out = tvn_on_controls_joint(
-        embeddings.copy(), metadata, pert_col="pert",
-        control_key="nontargeting", batch_col="batch_values",
+        embeddings.copy(),
+        metadata,
+        pert_col="pert",
+        control_key="nontargeting",
+        batch_col="batch_values",
     )
     ctrl_mask = (metadata["pert"] == "nontargeting").to_numpy()
     pooled = out[ctrl_mask]
@@ -191,8 +214,11 @@ def test_tvn_on_controls_joint_shared_basis_aligns_classes():
     """After TVN, class-A and class-B controls should overlap (same mean, similar spread)."""
     embeddings, metadata = _make_joint_synthetic()
     out = tvn_on_controls_joint(
-        embeddings.copy(), metadata, pert_col="pert",
-        control_key="nontargeting", batch_col="batch_values",
+        embeddings.copy(),
+        metadata,
+        pert_col="pert",
+        control_key="nontargeting",
+        batch_col="batch_values",
     )
     ctrl_a = out[(metadata["class"] == "A") & (metadata["pert"] == "nontargeting")]
     ctrl_b = out[(metadata["class"] == "B") & (metadata["pert"] == "nontargeting")]
@@ -206,8 +232,11 @@ def test_tvn_on_controls_joint_shared_basis_aligns_classes():
 def test_tvn_on_controls_joint_preserves_row_order():
     embeddings, metadata = _make_joint_synthetic()
     out = tvn_on_controls_joint(
-        embeddings.copy(), metadata, pert_col="pert",
-        control_key="nontargeting", batch_col="batch_values",
+        embeddings.copy(),
+        metadata,
+        pert_col="pert",
+        control_key="nontargeting",
+        batch_col="batch_values",
     )
     assert out.shape == embeddings.shape
 
@@ -219,8 +248,11 @@ def test_tvn_on_controls_joint_uses_control_col_when_provided():
     metadata["gene"] = metadata["barcode"].replace({"nontargeting": "nontargeting"})
     metadata.loc[metadata["barcode"] == "g1", "gene"] = "GENE1"
     out = tvn_on_controls_joint(
-        embeddings.copy(), metadata, pert_col="barcode",
-        control_key="nontargeting", batch_col="batch_values",
+        embeddings.copy(),
+        metadata,
+        pert_col="barcode",
+        control_key="nontargeting",
+        batch_col="batch_values",
         control_col="gene",
     )
     ctrl_mask = (metadata["gene"] == "nontargeting").to_numpy()

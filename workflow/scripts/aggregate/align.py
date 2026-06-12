@@ -17,6 +17,7 @@ from lib.aggregate.align import (
     tvn_on_controls,
     tvn_on_controls_joint,
     stratified_subsample,
+    validate_joint_align_config,
 )
 from lib.aggregate.filter import harmonize_pool_schema, degeneracy_keep_list
 from lib.aggregate.perturbation_score import perturbation_score
@@ -35,6 +36,11 @@ JOINT_PCA_SUBSAMPLE = 100_000
 JOINT_PCA_MIN_PER_CLASS = 5_000
 
 is_joint = snakemake.wildcards.cell_class == "joint"
+
+# Joint TVN sees only the controls in each align chunk, so >1 chunk fragments
+# the shared rotation/target covariance into non-comparable per-chunk bases.
+# Fail loudly rather than emit a silently corrupted embedding.
+validate_joint_align_config(is_joint, snakemake.params.num_align_batches)
 
 # Filter out empty parquet files to avoid schema conflicts
 non_empty_paths = [
