@@ -144,7 +144,7 @@ def test_validate_joint_align_config_allows_multi_chunk_non_joint():
     validate_joint_align_config(is_joint=False, num_align_batches=8)
 
 
-from lib.aggregate.align import tvn_on_controls_joint
+from lib.aggregate.align import tvn_on_controls_joint, tvn_on_controls
 
 
 def _make_joint_synthetic(n_per_class=400, n_features=8, seed=0):
@@ -258,3 +258,113 @@ def test_tvn_on_controls_joint_uses_control_col_when_provided():
     ctrl_mask = (metadata["gene"] == "nontargeting").to_numpy()
     pooled = out[ctrl_mask]
     assert np.abs(pooled.mean(axis=0)).max() < 0.5
+
+
+def _make_skewed_joint_synthetic(seed=0, n_features=6):
+    """Two classes whose controls have OPPOSITE skew but identical mean and covariance.
+
+    Mean-centering leaves a per-class median offset (opposite sign per class), so the
+    classes' control *median* centroids separate even though their *mean* centroids
+    coincide — the exact pathology behind the Infected/Uninfected shift. Covariance is
+    shared across (class, batch), so CORAL is ~identity for controls and the centering
+    statistic alone determines the final control location.
+    """
+    rng = np.random.default_rng(seed)
+    rows, feats = [], []
+    for cls, sign in [("A", -1.0), ("B", 1.0)]:
+        for batch in ["b1", "b2"]:
+            n_ctrl, n_pert = 800, 200
+            # Exp(1): mean 1, median ln2. Center to mean 0, then flip sign per class so
+            # class A controls are right-skewed (median<0) and class B left-skewed (median>0).
+            ctrl = sign * (rng.exponential(1.0, size=(n_ctrl, n_features)) - 1.0)
+            pert = sign * (rng.exponential(1.0, size=(n_pert, n_features)) - 1.0)
+            pert[:, 0] += 2.0  # a real perturbation effect so perturbed != control
+            feats += [ctrl, pert]
+            rows += [(cls, batch, "nontargeting")] * n_ctrl + [
+                (cls, batch, "g1")
+            ] * n_pert
+    embeddings = np.vstack(feats).astype(np.float64)
+    metadata = pd.DataFrame(rows, columns=["class", "batch_values", "pert"])
+    return embeddings, metadata
+
+
+def _control_class_median_sep(out, metadata):
+    ctrl = metadata["pert"].str.startswith("nontargeting").to_numpy()
+    meds = [
+        np.median(out[ctrl & (metadata["class"] == c).to_numpy()], axis=0)
+        for c in ("A", "B")
+    ]
+    return float(np.linalg.norm(meds[0] - meds[1]))
+
+
+def test_tvn_joint_mad_reduces_control_median_separation():
+    """On skewed controls, method='mad' shrinks the per-class control MEDIAN offset
+    that mean centering leaves behind (the Infected/Uninfected pathology)."""
+    emb, meta = _make_skewed_joint_synthetic()
+    out_std = tvn_on_controls_joint(
+        emb.copy(),
+        meta,
+        pert_col="pert",
+        control_key="nontargeting",
+        batch_col="batch_values",
+        method="standard",
+    )
+    out_mad = tvn_on_controls_joint(
+        emb.copy(),
+        meta,
+        pert_col="pert",
+        control_key="nontargeting",
+        batch_col="batch_values",
+        method="mad",
+    )
+    sep_std = _control_class_median_sep(out_std, meta)
+    sep_mad = _control_class_median_sep(out_mad, meta)
+    assert sep_mad < 0.5 * sep_std, f"mad={sep_mad:.3f} not < 0.5*std={sep_std:.3f}"
+
+
+def test_tvn_joint_method_defaults_to_standard():
+    """Omitting method must reproduce method='standard' exactly (no behavior change)."""
+    emb, meta = _make_skewed_joint_synthetic()
+    out_default = tvn_on_controls_joint(
+        emb.copy(),
+        meta,
+        pert_col="pert",
+        control_key="nontargeting",
+        batch_col="batch_values",
+    )
+    out_std = tvn_on_controls_joint(
+        emb.copy(),
+        meta,
+        pert_col="pert",
+        control_key="nontargeting",
+        batch_col="batch_values",
+        method="standard",
+    )
+    np.testing.assert_array_equal(out_default, out_std)
+
+
+def test_tvn_on_controls_mad_centers_control_median():
+    """Non-joint: method='mad' drives the control MEDIAN (not mean) to ~0 on a
+    single skewed control population."""
+    rng = np.random.default_rng(1)
+    n_features = 6
+    rows, feats = [], []
+    for batch in ("b1", "b2"):
+        ctrl = rng.exponential(1.0, size=(800, n_features)) - 1.0  # mean 0, median < 0
+        pert = rng.exponential(1.0, size=(200, n_features)) - 1.0
+        pert[:, 0] += 2.0
+        feats += [ctrl, pert]
+        rows += [(batch, "nontargeting")] * 800 + [(batch, "g1")] * 200
+    emb = np.vstack(feats)
+    meta = pd.DataFrame(rows, columns=["batch_values", "pert"])
+    out_std = tvn_on_controls(
+        emb.copy(), meta, "pert", "nontargeting", "batch_values", method="standard"
+    )
+    out_mad = tvn_on_controls(
+        emb.copy(), meta, "pert", "nontargeting", "batch_values", method="mad"
+    )
+    ctrl = meta["pert"].str.startswith("nontargeting").to_numpy()
+    med_std = float(np.abs(np.median(out_std[ctrl], axis=0)).max())
+    med_mad = float(np.abs(np.median(out_mad[ctrl], axis=0)).max())
+    assert med_mad < med_std, f"mad median {med_mad:.3f} not < std median {med_std:.3f}"
+    assert med_mad < 0.2, f"mad control median not ~0: {med_mad:.3f}"

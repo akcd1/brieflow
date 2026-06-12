@@ -162,6 +162,9 @@ rule align:
         control_name_col=config["aggregate"].get("control_name_col"),
         drop_cols_threshold=config["aggregate"].get("drop_cols_threshold"),
         degeneracy_filter=config["aggregate"].get("degeneracy_filter", {}),
+        feature_normalization=config["aggregate"].get(
+            "feature_normalization", "standard"
+        ),
     script:
         "../scripts/aggregate/align.py"
 

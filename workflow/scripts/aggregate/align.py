@@ -291,6 +291,7 @@ for i, indices in enumerate(subset_indices):
     features = centerscale_by_batch(features, metadata, "batch_values")
     features = pca.transform(features)
 
+    tvn_method = snakemake.params.get("feature_normalization", "standard")
     if is_joint:
         features = tvn_on_controls_joint(
             features,
@@ -299,6 +300,7 @@ for i, indices in enumerate(subset_indices):
             snakemake.params.control_key,
             "batch_values",
             control_col=snakemake.params.get("control_name_col"),
+            method=tvn_method,
         )
     else:
         features = tvn_on_controls(
@@ -308,6 +310,7 @@ for i, indices in enumerate(subset_indices):
             snakemake.params.control_key,
             "batch_values",
             control_col=snakemake.params.get("control_name_col"),
+            method=tvn_method,
         )
 
     feature_columns = [f"PC_{j}" for j in range(features.shape[1])]

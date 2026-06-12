@@ -142,6 +142,7 @@ def tvn_on_controls(
     control_key: str,
     batch_col: str | None = None,
     control_col: str | None = None,
+    method: str = "standard",
 ) -> np.ndarray:
     """Apply TVN (Typical Variation Normalization) to the data based on the control perturbation units.
 
@@ -157,6 +158,10 @@ def tvn_on_controls(
         control_col (str, optional): Column name to use for identifying control cells.
             When None, uses pert_col. Useful when aggregating by barcode but controls
             are identified by gene name in a different column. Defaults to None.
+        method (str, optional): Centering/scaling statistic for the control-based
+            centerscale steps. "standard" (mean/std) or "mad" (median/MAD). Use "mad"
+            to match median aggregation. Defaults to "standard". Does not change the
+            CORAL covariance estimator.
 
     Returns:
         np.ndarray: The normalized embeddings.
@@ -168,11 +173,22 @@ def tvn_on_controls(
         print("Warning: no control cells found, skipping TVN normalization")
         return embeddings
     embeddings = centerscale_on_controls(
-        embeddings, metadata, pert_col, control_key, control_col=lookup_col
+        embeddings,
+        metadata,
+        pert_col,
+        control_key,
+        method=method,
+        control_col=lookup_col,
     )
     embeddings = PCA().fit(embeddings[ctrl_ind]).transform(embeddings)
     embeddings = centerscale_on_controls(
-        embeddings, metadata, pert_col, control_key, batch_col, control_col=lookup_col
+        embeddings,
+        metadata,
+        pert_col,
+        control_key,
+        batch_col,
+        method=method,
+        control_col=lookup_col,
     )
     target_cov = np.cov(embeddings[ctrl_ind], rowvar=False, ddof=1) + 0.5 * np.eye(
         embeddings.shape[1]
@@ -243,6 +259,7 @@ def tvn_on_controls_joint(
     control_key: str,
     batch_col: str,
     control_col: str | None = None,
+    method: str = "standard",
 ) -> np.ndarray:
     """Joint-mode TVN with shared rotation and target covariance across classes.
 
@@ -263,6 +280,11 @@ def tvn_on_controls_joint(
         batch_col: Column name with batch labels.
         control_col: Column to use for identifying controls. When None, uses
             `pert_col`.
+        method: Centering/scaling statistic for the per-class control centerscale
+            steps (1 and 3). "standard" (mean/std) or "mad" (median/MAD). Use "mad"
+            to match median aggregation so the post-TVN per-class control median —
+            not just the mean — sits at the origin. Does not change the CORAL
+            covariance estimator. Defaults to "standard".
 
     Returns:
         np.ndarray of aligned embeddings, same shape as input. Row order preserved.
@@ -285,6 +307,7 @@ def tvn_on_controls_joint(
             cls_meta,
             pert_col,
             control_key,
+            method=method,
             control_col=lookup_col,
         )
 
@@ -310,6 +333,7 @@ def tvn_on_controls_joint(
             pert_col,
             control_key,
             batch_col=batch_col,
+            method=method,
             control_col=lookup_col,
         )
 
