@@ -292,6 +292,7 @@ for i, indices in enumerate(subset_indices):
     features = pca.transform(features)
 
     tvn_method = snakemake.params.get("feature_normalization", "standard")
+    post_coral_recenter = snakemake.params.get("post_coral_median_recenter", False)
     if is_joint:
         features = tvn_on_controls_joint(
             features,
@@ -301,6 +302,7 @@ for i, indices in enumerate(subset_indices):
             "batch_values",
             control_col=snakemake.params.get("control_name_col"),
             method=tvn_method,
+            post_coral_median_recenter=post_coral_recenter,
         )
     else:
         features = tvn_on_controls(

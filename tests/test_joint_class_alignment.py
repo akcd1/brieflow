@@ -412,9 +412,45 @@ def _worst_group_control_median(out, metadata):
     return worst
 
 
-def test_tvn_joint_mad_zeroes_per_group_control_median_after_coral():
-    """method='mad' must drive each (class, batch) control MEDIAN to ~0 even when
-    CORAL is non-trivial — i.e. re-centered AFTER CORAL, not just before it."""
+def test_tvn_joint_post_coral_recenter_zeroes_control_median_with_mad():
+    """post_coral_median_recenter must drive each (class, batch) control MEDIAN to
+    ~0 even when CORAL is non-trivial — i.e. re-centered AFTER CORAL."""
+    emb, meta = _make_skewed_heterocov_joint()
+    out = tvn_on_controls_joint(
+        emb.copy(),
+        meta,
+        pert_col="pert",
+        control_key="nontargeting",
+        batch_col="batch_values",
+        method="mad",
+        post_coral_median_recenter=True,
+    )
+    worst = _worst_group_control_median(out, meta)
+    assert worst < 0.05, (
+        f"per-(class,batch) control median not ~0 after CORAL: {worst:.3f}"
+    )
+
+
+def test_tvn_joint_post_coral_recenter_independent_of_scaling():
+    """The post-CORAL median re-center is a location fix independent of the scaling
+    statistic: it zeroes the control median even with standard (mean/std) upstream."""
+    emb, meta = _make_skewed_heterocov_joint()
+    out = tvn_on_controls_joint(
+        emb.copy(),
+        meta,
+        pert_col="pert",
+        control_key="nontargeting",
+        batch_col="batch_values",
+        method="standard",
+        post_coral_median_recenter=True,
+    )
+    worst = _worst_group_control_median(out, meta)
+    assert worst < 0.05, f"control median not ~0 with standard+step6: {worst:.3f}"
+
+
+def test_tvn_joint_post_coral_recenter_defaults_off():
+    """Default (flag off) leaves CORAL's reintroduced median uncorrected — the flag
+    is what enables the fix, not the scaling statistic."""
     emb, meta = _make_skewed_heterocov_joint()
     out = tvn_on_controls_joint(
         emb.copy(),
@@ -425,6 +461,4 @@ def test_tvn_joint_mad_zeroes_per_group_control_median_after_coral():
         method="mad",
     )
     worst = _worst_group_control_median(out, meta)
-    assert worst < 0.05, (
-        f"per-(class,batch) control median not ~0 after CORAL: {worst:.3f}"
-    )
+    assert worst > 0.05, f"expected residual median with flag off, got {worst:.3f}"

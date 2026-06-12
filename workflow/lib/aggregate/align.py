@@ -260,6 +260,7 @@ def tvn_on_controls_joint(
     batch_col: str,
     control_col: str | None = None,
     method: str = "standard",
+    post_coral_median_recenter: bool = False,
 ) -> np.ndarray:
     """Joint-mode TVN with shared rotation and target covariance across classes.
 
@@ -281,10 +282,17 @@ def tvn_on_controls_joint(
         control_col: Column to use for identifying controls. When None, uses
             `pert_col`.
         method: Centering/scaling statistic for the per-class control centerscale
-            steps (1 and 3). "standard" (mean/std) or "mad" (median/MAD). Use "mad"
-            to match median aggregation so the post-TVN per-class control median —
-            not just the mean — sits at the origin. Does not change the CORAL
-            covariance estimator. Defaults to "standard".
+            steps (1 and 3). "standard" (mean/std) or "mad" (median/MAD). This sets
+            the embedding *geometry* (the step-2 rotation and CORAL whitening are
+            fit on the rescaled controls). Does not change the CORAL covariance
+            estimator. Defaults to "standard".
+        post_coral_median_recenter: When True, add step 6 — a per-(class, batch)
+            median re-center on controls AFTER CORAL. This is a pure location fix
+            (translation, preserving CORAL's covariance alignment) that places the
+            post-TVN control *median* at the origin to match median aggregation.
+            Independent of `method`: CORAL reintroduces a median offset regardless of
+            the scaling statistic, so this corrects it either way. Defaults to False
+            (existing behavior unchanged).
 
     Returns:
         np.ndarray of aligned embeddings, same shape as input. Row order preserved.
@@ -351,7 +359,7 @@ def tvn_on_controls_joint(
             control_col=lookup_col,
         )
 
-    if method == "mad":
+    if post_coral_median_recenter:
         print(
             f"[JOINT TVN] worst (class,batch) ctrl |median| after step 3 (pre-CORAL): {_worst_ctrl_median():.4f}"
         )
@@ -389,13 +397,12 @@ def tvn_on_controls_joint(
 
     # ---- Step 6: post-CORAL per-(class, batch) median re-center on controls ----
     # CORAL (step 5) is a linear reshape that does NOT preserve the componentwise
-    # median, so median centering done before CORAL (steps 1/3) leaks back into a
-    # nonzero control median. For method="mad" we re-center each (class, batch) on
-    # its control median AFTER CORAL. This is a pure translation, so it preserves
+    # median, so any control median offset (present regardless of the step-1/3
+    # scaling statistic) survives CORAL. When enabled, re-center each (class, batch)
+    # on its control median AFTER CORAL. This is a pure translation, so it preserves
     # CORAL's covariance alignment while placing the post-TVN control *median* — the
-    # statistic median aggregation uses — at the origin. Skipped for "standard":
-    # CORAL already preserves the mean=0 set in step 3, so this would be a no-op.
-    if method == "mad":
+    # statistic median aggregation uses — at the origin. Independent of `method`.
+    if post_coral_median_recenter:
         print(
             f"[JOINT TVN] worst (class,batch) ctrl |median| after CORAL (pre step 6): "
             f"{_worst_ctrl_median():.4f}"

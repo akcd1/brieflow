@@ -165,6 +165,9 @@ rule align:
         feature_normalization=config["aggregate"].get(
             "feature_normalization", "standard"
         ),
+        post_coral_median_recenter=config["aggregate"].get(
+            "post_coral_median_recenter", False
+        ),
     script:
         "../scripts/aggregate/align.py"
 
