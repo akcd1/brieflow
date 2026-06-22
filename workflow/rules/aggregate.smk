@@ -93,6 +93,8 @@ rule filter:
         filter_queries=config["aggregate"]["filter_queries"] or [],
         # Full per-class query map; the script applies the right subset per class.
         filter_queries_by_class=config["aggregate"].get("filter_queries_by_class", {}) or {},
+        # Axis-specific edge-offset filter (opt-in: {enabled, tile_size}).
+        edge_offset_filter=config["aggregate"].get("edge_offset_filter", {}) or {},
         perturbation_name_col=config["aggregate"]["perturbation_name_col"],
         drop_cols_threshold=config["aggregate"]["drop_cols_threshold"],
         drop_rows_threshold=config["aggregate"]["drop_rows_threshold"],

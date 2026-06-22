@@ -3,6 +3,7 @@ import pandas as pd
 from lib.aggregate.cell_data_utils import load_metadata_cols, split_cell_data
 from lib.aggregate.filter import (
     query_filter,
+    edge_offset_filter,
     perturbation_filter,
     missing_values_filter,
     intensity_filter,
@@ -111,6 +112,15 @@ else:
     write_empty_and_exit(metadata, features, output_path, "perturbation_filter")
 
 # --- GLOBAL FILTERS (both modes) ---
+# Axis-specific edge-offset drop (opt-in). Runs before missing-values/intensity
+# so corrupted edge cells never enter imputation or outlier statistics.
+edge_offset_cfg = snakemake.params.get("edge_offset_filter", {}) or {}
+if edge_offset_cfg.get("enabled", False):
+    metadata, features = edge_offset_filter(
+        metadata, features, edge_offset_cfg.get("tile_size")
+    )
+    write_empty_and_exit(metadata, features, output_path, "edge_offset_filter")
+
 metadata, features = missing_values_filter(
     metadata,
     features,

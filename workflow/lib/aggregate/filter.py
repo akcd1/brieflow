@@ -2,6 +2,8 @@
 
 Available filters:
 - query_filter: Apply pandas query strings to filter cells
+- edge_offset_filter: Drop cells whose bbox is within the per-tile channel
+  alignment offset of a tile edge (axis-specific)
 - perturbation_filter: Remove cells without perturbation assignments
 - missing_values_filter: Handle missing values through dropping or imputation
 - intensity_filter: Remove outliers based on channel intensities using LocalOutlierFactor
@@ -142,6 +144,77 @@ def query_filter(metadata, features, queries):
         metadata, features = metadata_filtered, features_filtered
 
     return metadata.reset_index(drop=True), features.reset_index(drop=True)
+
+
+EDGE_OFFSET_BBOX_COLS = [
+    "cell_bounds_0",
+    "cell_bounds_1",
+    "cell_bounds_2",
+    "cell_bounds_3",
+]
+EDGE_OFFSET_OFFSET_COLS = ["offset_x", "offset_y"]
+
+
+def edge_offset_filter(metadata, features, tile_size):
+    """Drop cells whose cell bounding box lies within the per-tile channel
+    alignment offset of a tile edge.
+
+    ``align_phenotype`` shifts each channel onto the reference by a per-tile
+    ``(offset_y, offset_x)`` (row, col) pixel shift. After alignment the valid
+    image region shrinks by that offset on each axis, so a cell within
+    ``|offset|`` px of an edge has corrupted (wrapped/zero-padded) pixels in the
+    shifted channels. The upstream literal-edge filter (bbox == 0 / tile_size)
+    misses these because it ignores the offset.
+
+    A cell is KEPT only if all four bbox edges clear the offset margin on their
+    own axis: the top/bottom (row) edges against ``|offset_y|`` and the
+    left/right (col) edges against ``|offset_x|``. ``|offset|`` is applied to
+    both edges of an axis, which is correct whether alignment wraps or zero-pads.
+    Cells with a missing (NaN) offset on either axis are dropped (cannot verify).
+
+    Requires the following metadata columns:
+    ``cell_bounds_0..3`` (0=min_row, 1=min_col, 2=max_row, 3=max_col),
+    ``offset_x`` (col shift), ``offset_y`` (row shift).
+
+    Args:
+        metadata (pd.DataFrame): metadata frame (must carry the columns above).
+        features (pd.DataFrame): features frame, row-aligned to ``metadata``.
+        tile_size (int): phenotype field-of-view size in pixels (e.g. 2400).
+
+    Returns:
+        tuple: (filtered_metadata, filtered_features), indices reset.
+    """
+    if tile_size is None:
+        raise ValueError("edge_offset_filter: tile_size is required")
+    required = EDGE_OFFSET_BBOX_COLS + EDGE_OFFSET_OFFSET_COLS
+    missing = [c for c in required if c not in metadata.columns]
+    if missing:
+        raise ValueError(f"edge_offset_filter: metadata missing columns {missing}")
+
+    oy = metadata["offset_y"].abs()
+    ox = metadata["offset_x"].abs()
+    d_top = metadata["cell_bounds_0"]
+    d_bottom = tile_size - metadata["cell_bounds_2"]
+    d_left = metadata["cell_bounds_1"]
+    d_right = tile_size - metadata["cell_bounds_3"]
+
+    # Keep only when every edge strictly clears its axis offset; NaN offsets
+    # make the comparison False, so those cells are dropped.
+    keep = (
+        ((d_top > oy) & (d_bottom > oy) & (d_left > ox) & (d_right > ox))
+        .fillna(False)
+        .to_numpy()
+    )
+
+    before = len(metadata)
+    # Positional boolean selection is robust to duplicate index labels.
+    metadata_f = metadata.loc[keep].reset_index(drop=True)
+    features_f = features.loc[keep].reset_index(drop=True)
+    print(
+        f"edge_offset_filter (tile_size={tile_size}): dropped "
+        f"{before - len(metadata_f)} of {before} cells within offset of a tile edge"
+    )
+    return metadata_f, features_f
 
 
 def perturbation_filter(
