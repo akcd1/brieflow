@@ -7,6 +7,7 @@ DEFAULT_METADATA_COLS = [
     "tile",
     "source_folder",
     "row_label",
+    "column_label",
     "cell_0",
     "i_0",
     "j_0",

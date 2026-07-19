@@ -49,12 +49,16 @@ plate = str(snakemake.wildcards.plate)
 plate_folders = snakemake.config["preprocess"].get("plate_folders", {})
 vacuole_phenotype["source_folder"] = plate_folders.get(plate, "")
 
-# Add row label from config (plate → row letter → label)
-row_labels = snakemake.config["preprocess"].get("row_labels", {})
-plate_row_labels = row_labels.get(plate, {})
+# Add row/column labels from config (plate → row letter / column number → label)
 well = str(snakemake.wildcards.well)
 row_letter = well[0]  # e.g., "A1" → "A"
-vacuole_phenotype["row_label"] = plate_row_labels.get(row_letter, "")
+column_number = well[1:].lstrip("0") or well[1:]  # e.g., "A1"/"A01" → "1"
+
+row_labels = snakemake.config["preprocess"].get("row_labels", {})
+vacuole_phenotype["row_label"] = row_labels.get(plate, {}).get(row_letter, "")
+
+column_labels = snakemake.config["preprocess"].get("column_labels", {})
+vacuole_phenotype["column_label"] = column_labels.get(plate, {}).get(column_number, "")
 
 # Save results
 vacuole_phenotype.to_csv(snakemake.output[0], sep="\t", index=False)
