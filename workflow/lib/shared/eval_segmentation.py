@@ -27,8 +27,8 @@ def segmentation_overview(segmentation_stats_paths):
 
     Returns:
         pandas.DataFrame: A DataFrame with aggregated segmentation counts for each well.
-            Columns include 'well', 'initial_nuclei', 'initial_cells', 'after_edge_removal_nuclei',
-            'after_edge_removal_cells', 'final_cells', and 'final_nuclei', with values summed across tiles.
+            Columns include 'well', 'initial_primary', 'initial_cells', 'after_edge_removal_primary',
+            'after_edge_removal_cells', 'final_cells', and 'final_primary', with values summed across tiles.
     """
     # Initialize an empty list to store individual DataFrames
     data_frames = []
@@ -135,8 +135,8 @@ def evaluate_segmentation_paramsearch(
     Args:
         df (pandas.DataFrame): DataFrame containing segmentation results with columns:
             nuclei_diameter, cell_diameter, flow_threshold, cellprob_threshold,
-            initial_nuclei, initial_cells, final_cells, final_nuclei,
-            after_edge_removal_cells, after_edge_removal_nuclei, path
+            initial_primary, initial_cells, final_cells, final_primary,
+            after_edge_removal_cells, after_edge_removal_primary, path
         segmentation_process (str, optional): Process type to evaluate.
             Must be either "sbs" or "phenotype". Defaults to "sbs".
         default_cell_diameter (float, optional): Reference cell diameter for comparison.
@@ -156,7 +156,7 @@ def evaluate_segmentation_paramsearch(
 
     Returns:
         pandas.DataFrame: Statistics grouped by parameter combinations, containing columns:
-            initial_nuclei_mean, initial_cells_mean, final_cells_mean, final_nuclei_mean,
+            initial_primary_mean, initial_cells_mean, final_cells_mean, final_primary_mean,
             cell_retention_mean, nuclei_retention_mean, measurement_count, combined_score
         str: Formatted summary text containing performance metrics for optimal and default parameters
         Micropanel: Visualization comparing optimal and default segmentation results (if defaults provided)
@@ -206,13 +206,13 @@ def evaluate_segmentation_paramsearch(
     ]
 
     df["cell_retention"] = df["final_cells"] / df["after_edge_removal_cells"]
-    df["nuclei_retention"] = df["final_nuclei"] / df["after_edge_removal_nuclei"]
+    df["nuclei_retention"] = df["final_primary"] / df["after_edge_removal_primary"]
 
     metrics = [
-        "initial_nuclei",
+        "initial_primary",
         "initial_cells",
         "final_cells",
-        "final_nuclei",
+        "final_primary",
         "cell_retention",
         "nuclei_retention",
     ]
@@ -221,10 +221,10 @@ def evaluate_segmentation_paramsearch(
         df.groupby(param_cols)[metrics]
         .agg(
             {
-                "initial_nuclei": ["mean"],
+                "initial_primary": ["mean"],
                 "initial_cells": ["mean"],
                 "final_cells": ["mean"],
-                "final_nuclei": ["mean"],
+                "final_primary": ["mean"],
                 "cell_retention": ["mean"],
                 "nuclei_retention": ["mean"],
             }
@@ -258,7 +258,7 @@ def evaluate_segmentation_paramsearch(
     - Cell Retention: {best_stats["cell_retention_mean"] * 100:.1f}%
     - Nuclei Retention: {best_stats["nuclei_retention_mean"] * 100:.1f}%
     - Final Cells (avg): {best_stats["final_cells_mean"]:.0f}
-    - Final Nuclei (avg): {best_stats["final_nuclei_mean"]:.0f}
+    - Final Nuclei (avg): {best_stats["final_primary_mean"]:.0f}
     - Number of measurements: {best_stats["measurement_count"]}
     - Combined Score: {best_stats["combined_score"]:.1f}"""
 
@@ -282,7 +282,7 @@ def evaluate_segmentation_paramsearch(
     - Cell Retention: {default_stats["cell_retention_mean"] * 100:.1f}%
     - Nuclei Retention: {default_stats["nuclei_retention_mean"] * 100:.1f}%
     - Final Cells (avg): {default_stats["final_cells_mean"]:.0f}
-    - Final Nuclei (avg): {default_stats["final_nuclei_mean"]:.0f}
+    - Final Nuclei (avg): {default_stats["final_primary_mean"]:.0f}
     - Number of measurements: {default_stats["measurement_count"]}
     - Combined Score: {default_stats["combined_score"]:.1f}"""
 

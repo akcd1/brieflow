@@ -3,9 +3,9 @@
 This module provides functions for segmenting microscopy images using the Cellpose algorithm
 (relating to SBS base calling and phenotyping -- steps 1 and 2). It includes functions for:
 
-1. Cell and Primary Segmentation: Segmenting cells and primary from various image types.
+1. Cell and Primary Object Segmentation: Segmenting cells and primary objects from various image types.
 2. Image Preprocessing: Applying log scaling and other preprocessing techniques to images.
-3. Label Reconciliation: Reconciling primary and cell labels based on their spatial relationships.
+3. Label Reconciliation: Reconciling primary object and cell labels based on their spatial relationships.
 4. Mask Processing: Manipulating and refining segmentation masks.
 5. Utility Functions: Supporting operations for image analysis and segmentation tasks.
 
@@ -134,33 +134,33 @@ def segment_cellpose(
         data (numpy.ndarray): Multichannel image data.
         dapi_index (int): Index of DAPI channel.
         cyto_index (int): Index of cytoplasmic channel.
-        primary_diameter (int): Estimated diameter of primary.
+        primary_diameter (int): Estimated diameter of primary objects.
         cell_diameter (int): Estimated diameter of cells.
         cellpose_model (str, optional): Cellpose model type to use (e.g., 'cyto3', 'cpsam').
             Default is 'cyto3'. Use 'cpsam' for Cellpose-SAM (requires Cellpose 4.x).
         helper_index (int, optional): Index of helper channel for improved segmentation (CPSAM feature).
             Only used with multi-channel models. Default is None (blank channel).
         cellpose_kwargs (dict, optional): Additional keyword arguments for Cellpose, including:
-            - flow_threshold (float): Default flow threshold for both primary and cells if specific ones not provided
-            - cellprob_threshold (float): Default cell probability threshold for both primary and cells if specific ones not provided
+            - flow_threshold (float): Default flow threshold for both primary objects and cells if specific ones not provided
+            - cellprob_threshold (float): Default cell probability threshold for both primary objects and cells if specific ones not provided
             - primary_flow_threshold (float): Specific flow threshold for primary segmentation
             - primary_cellprob_threshold (float): Specific cell probability threshold for primary segmentation
             - cell_flow_threshold (float): Specific flow threshold for cell segmentation
             - cell_cellprob_threshold (float): Specific cell probability threshold for cell segmentation
-        cells (bool, optional): Whether to segment both primary and cells or just primary.
-        reconcile (str, optional): Method for reconciling primary and cells. Default is 'consensus'.
+        cells (bool, optional): Whether to segment both primary objects and cells or just primary objects.
+        reconcile (str, optional): Method for reconciling primary objects and cells. Default is 'consensus'.
         logscale (bool, optional): Whether to apply logarithmic transformation to image data.
-        return_counts (bool, optional): Whether to return counts of primary and cells. Default is False.
+        return_counts (bool, optional): Whether to return counts of primary objects and cells. Default is False.
         gpu (bool, optional): Whether to use GPU for segmentation. Default is False.
 
     Returns:
-        tuple or numpy.ndarray: If 'cells' is True, returns tuple of primary and cell segmentation masks,
+        tuple or numpy.ndarray: If 'cells' is True, returns tuple of primary object and cell segmentation masks,
         otherwise returns only primary segmentation mask. If return_counts is True, includes a dictionary of counts.
     """
     # Extract log_kwargs from cellpose_kwargs
     log_kwargs = cellpose_kwargs.pop("log_kwargs", dict())
 
-    # Extract specific thresholds for primary and cells
+    # Extract specific thresholds for primary objects and cells
     primary_flow_threshold = cellpose_kwargs.pop(
         "primary_flow_threshold", cellpose_kwargs.get("flow_threshold", 0.4)
     )
@@ -228,7 +228,7 @@ def segment_cellpose(
         counts["final_primary"] = len(np.unique(primary)) - 1
         counts["final_cells"] = len(np.unique(cells)) - 1
         counts_df = pd.DataFrame([counts])
-        print(f"Number of primary segmented: {counts['final_primary']}")
+        print(f"Number of primary objects segmented: {counts['final_primary']}")
         print(f"Number of cells segmented: {counts['final_cells']}")
 
         if return_counts:
@@ -244,7 +244,7 @@ def segment_cellpose(
             **primary_kwargs,
         )
         counts["final_primary"] = len(np.unique(primary)) - 1
-        print(f"Number of primary segmented: {counts['final_primary']}")
+        print(f"Number of primary objects segmented: {counts['final_primary']}")
         counts_df = pd.DataFrame([counts])
 
         if return_counts:
@@ -329,7 +329,7 @@ def estimate_diameters(
         dapi_index (int): Index of DAPI channel
         cyto_index (int): Index of cytoplasmic channel
         helper_index (int, optional): Index of helper channel. Default is None.
-        channels (list): Channel indices for diameter estimation [cytoplasm, primary]
+        channels (list): Channel indices for cellpose_model diameter estimation: [cytoplasm, nuclei]
         cellpose_model (str): Cellpose model type to use (e.g., 'cyto3', 'cpsam')
         cellpose_kwargs (dict): Additional keyword arguments for Cellpose
         gpu (bool): Whether to use GPU
@@ -372,10 +372,10 @@ def estimate_diameters(
     size_model_primary = SizeModel(
         cp_model=model_primary, pretrained_size=cellpose_models.size_model_path("nuclei")
     )
-    diam_nuclear, _ = size_model_primary.eval(rgb, channels=[3, 0])
-    diam_nuclear = np.maximum(5.0, diam_nuclear)
-    diam_nuclear = float(diam_nuclear)
-    print(f"Estimated nuclear diameter: {diam_nuclear:.1f} pixels")
+    diam_primary, _ = size_model_primary.eval(rgb, channels=[3, 0])
+    diam_primary = np.maximum(5.0, diam_primary)
+    diam_primary = float(diam_primary)
+    print(f"Estimated primary object diameter: {diam_primary:.1f} pixels")
 
     # Find optimal cell diameter using explicit SizeModel
     print("Estimating cell diameters...")
@@ -389,7 +389,7 @@ def estimate_diameters(
     diam_cell = float(diam_cell)
     print(f"Estimated cell diameter: {diam_cell:.1f} pixels")
 
-    return diam_nuclear, diam_cell
+    return diam_primary, diam_cell
 
 
 def segment_cellpose_rgb(
@@ -405,18 +405,18 @@ def segment_cellpose_rgb(
     cell_kwargs=None,
     **kwargs,
 ):
-    """Segment primary and cells using the Cellpose algorithm from an RGB image.
+    """Segment primary objects and cells using the Cellpose algorithm from an RGB image.
 
     Args:
         rgb (numpy.ndarray): RGB image.
-        primary_diameter (int): Diameter of primary for segmentation.
+        primary_diameter (int): Diameter of primary objects for segmentation.
         cell_diameter (int): Diameter of cells for segmentation.
         cellpose_model (str, optional): Cellpose model type to use (e.g., 'cyto3', 'cpsam').
             Default is 'cyto3'. Cellpose 3.x model_type: Use 'cyto3', 'nuclei', 'cyto2'.
             Cellpose 4.x: Use 'cpsam' only.
-        reconcile (str, optional): Method for reconciling primary and cells. Default is 'consensus'.
-        remove_edges (bool, optional): Whether to remove primary and cells touching the image edges. Default is True.
-        return_counts (bool, optional): Whether to return counts of primary and cells before reconciliation. Default is False.
+        reconcile (str, optional): Method for reconciling primary objects and cells. Default is 'consensus'.
+        remove_edges (bool, optional): Whether to remove primary objects and cells touching the image edges. Default is True.
+        return_counts (bool, optional): Whether to return counts of primary objects and cells before reconciliation. Default is False.
         gpu (bool, optional): Whether to use GPU for segmentation. Default is False.
         primary_kwargs (dict, optional): Specific parameters for primary segmentation. Default is None.
         cell_kwargs (dict, optional): Specific parameters for cell segmentation. Default is None.
@@ -424,9 +424,9 @@ def segment_cellpose_rgb(
 
     Returns:
         tuple: A tuple containing:
-            - primary (numpy.ndarray): Labeled segmentation mask of primary.
+            - primary (numpy.ndarray): Labeled segmentation mask of primary objects.
             - cells (numpy.ndarray): Labeled segmentation mask of cell boundaries.
-            - (optional) counts (dict): Counts of primary and cells at different stages if return_counts is True.
+            - (optional) counts (dict): Counts of primary objects and cells at different stages if return_counts is True.
 
     Raises:
         ValueError: If model is incompatible with installed Cellpose version
@@ -458,7 +458,7 @@ def segment_cellpose_rgb(
             rgb, diameter=cell_diameter, channels=[1, 2, 3], **cell_kwargs
         )
     else:
-        # Standard cyto models use cytoplasm (green=index 2) and primary (blue=index 3) channels
+        # Standard (non-CPSAM) cellpose_model values use cytoplasm (green=index 2) and nuclei (blue=index 3) channels
         cells, _, _ = model_cyto.eval(
             rgb, diameter=cell_diameter, channels=[2, 3], **cell_kwargs
         )
@@ -469,14 +469,14 @@ def segment_cellpose_rgb(
     counts["initial_cells"] = len(np.unique(cells)) - 1
 
     print(
-        f"found {counts['initial_primary']} primary before removing edges",
+        f"found {counts['initial_primary']} primary objects before removing edges",
         file=sys.stderr,
     )
     print(
         f"found {counts['initial_cells']} cells before removing edges", file=sys.stderr
     )
 
-    # Remove primary and cells touching the image edges if specified
+    # Remove primary objects and cells touching the image edges if specified
     if remove_edges:
         print("removing edges")
         primary = clear_border(primary)
@@ -486,7 +486,7 @@ def segment_cellpose_rgb(
     counts["after_edge_removal_cells"] = len(np.unique(cells)) - 1
 
     print(
-        f"found {counts['after_edge_removal_primary']} primary before reconciling",
+        f"found {counts['after_edge_removal_primary']} primary objects before reconciling",
         file=sys.stderr,
     )
     print(
@@ -494,7 +494,7 @@ def segment_cellpose_rgb(
         file=sys.stderr,
     )
 
-    # Reconcile primary and cells if specified
+    # Reconcile primary objects and cells if specified
     if reconcile:
         print(f"reconciling masks with method how={reconcile}")
         primary, cells = reconcile_primary_cells(primary, cells, how=reconcile)
@@ -518,39 +518,39 @@ def segment_cellpose_primary_rgb(
     remove_edges=True,
     **kwargs,
 ):
-    """Segment primary using the Cellpose algorithm from an RGB image.
+    """Segment primary objects using the Cellpose algorithm from an RGB image.
 
     Args:
         rgb (numpy.ndarray): RGB image.
-        primary_diameter (int): Diameter of primary for segmentation.
+        primary_diameter (int): Diameter of primary objects for segmentation.
         cellpose_model (str, optional): Cellpose model_type to use. Default is "nuclei".
             Can also use "cyto3" or other models if the "nuclei" model_type produces poor results.
         gpu (bool, optional): Whether to use GPU for segmentation. Default is False.
-        remove_edges (bool, optional): Whether to remove primary touching the image edges. Default is True.
+        remove_edges (bool, optional): Whether to remove primary objects touching the image edges. Default is True.
         **kwargs: Additional keyword arguments.
 
     Returns:
-        numpy.ndarray: Labeled segmentation mask of primary.
+        numpy.ndarray: Labeled segmentation mask of primary objects.
     """
     # Create Cellpose model using version-aware helper
     model = initialize_cellpose_model(cellpose_model, gpu=gpu)
 
-    # Segment primary using CellposeModel from the RGB image
+    # Segment primary objects using CellposeModel from the RGB image
     # Pass only blue channel (DAPI) for primary segmentation
     primary, _, _ = model.eval(rgb[2], diameter=primary_diameter, **kwargs)
 
-    # Print the number of primary found before and after removing edges
+    # Print the number of primary objects found before and after removing edges
     print(
-        f"found {len(np.unique(primary))} primary before removing edges", file=sys.stderr
+        f"found {len(np.unique(primary))} primary objects before removing edges", file=sys.stderr
     )
 
-    # Remove primary touching the image edges if specified
+    # Remove primary objects touching the image edges if specified
     if remove_edges:
         print("removing edges")
         primary = clear_border(primary)
 
-    # Print the final number of primary after processing
-    print(f"found {len(np.unique(primary))} final primary", file=sys.stderr)
+    # Print the final number of primary objects after processing
+    print(f"found {len(np.unique(primary))} final primary objects", file=sys.stderr)
 
-    # Return the segmented primary
+    # Return the segmented primary objects
     return primary

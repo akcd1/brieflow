@@ -3,9 +3,9 @@
 This module provides functions for segmenting microscopy images using the Watershed algorithm
 (relating to SBS base calling and phenotyping -- steps 1 and 2). It includes functions for:
 
-1. Cell and Primary Segmentation: Segmenting cells and primary from various image types.
+1. Cell and Primary Object Segmentation: Segmenting cells and primary objects from various image types.
 2. Image Preprocessing: Applying filtering and preprocessing techniques to images.
-3. Label Reconciliation: Reconciling primary and cell labels based on their spatial relationships.
+3. Label Reconciliation: Reconciling primary object and cell labels based on their spatial relationships.
 4. Mask Processing: Manipulating and refining segmentation masks.
 5. Utility Functions: Supporting operations for image analysis and segmentation tasks.
 
@@ -50,17 +50,17 @@ def segment_watershed(
     Args:
         data (numpy.ndarray): Image data for segmentation.
         primary_threshold (float): Threshold for primary segmentation.
-        primary_area_min (float): Minimum area for retaining primary after segmentation.
-        primary_area_max (float): Maximum area for retaining primary after segmentation.
+        primary_area_min (float): Minimum area for retaining primary objects after segmentation.
+        primary_area_max (float): Maximum area for retaining primary objects after segmentation.
         cell_threshold (float): Threshold used for cell boundary segmentation.
-        cells (bool, optional): Whether to segment both primary and cells or just primary. Default is True.
+        cells (bool, optional): Whether to segment both primary objects and cells or just primary objects. Default is True.
         smooth (float, optional): Size of Gaussian kernel for smoothing. Default is 1.35.
         radius (float, optional): Radius of disk for local thresholding. Default is 15.
-        return_counts (bool, optional): Whether to return counts of primary and cells. Default is False.
-        reconcile (str, optional): Method for reconciling primary and cells. Default is None.
+        return_counts (bool, optional): Whether to return counts of primary objects and cells. Default is False.
+        reconcile (str, optional): Method for reconciling primary objects and cells. Default is None.
 
     Returns:
-        tuple or numpy.ndarray: If 'cells' is True, returns tuple of primary and cell segmentation masks,
+        tuple or numpy.ndarray: If 'cells' is True, returns tuple of primary object and cell segmentation masks,
         otherwise returns only primary segmentation mask. If return_counts is True, includes a dictionary of counts.
     """
     # If SBS data, image will have 4 dimensions
@@ -72,7 +72,7 @@ def segment_watershed(
     else:
         primary_data = data
 
-    # Segment primary using the segment_primary method
+    # Segment primary objects using the segment_primary method
     primary = segment_primary(
         primary_data,
         primary_threshold,
@@ -97,7 +97,7 @@ def segment_watershed(
 
     counts["cells"] = len(np.unique(cells)) - 1  # Subtract 1 to exclude background
 
-    # Reconcile primary and cells if specified
+    # Reconcile primary objects and cells if specified
     if reconcile:
         print(f"reconciling masks with method how={reconcile}")
         primary, cells = reconcile_primary_cells(primary, cells, how=reconcile)
@@ -112,7 +112,7 @@ def segment_watershed(
 
 
 def segment_primary(data, threshold, area_min, area_max, smooth=1.35, radius=15):
-    """Find primary from DAPI channel.
+    """Find primary objects from DAPI channel.
 
     Uses local mean filtering to find cell foreground from aligned but unfiltered data,
     then filters identified regions by mean intensity threshold and area ranges.
@@ -122,14 +122,14 @@ def segment_primary(data, threshold, area_min, area_max, smooth=1.35, radius=15)
             If numpy.ndarray, expected dimensions are (CHANNEL, I, J) with the DAPI channel in channel index 0.
             If list, the first element is assumed to be the DAPI channel.
             Can also be a single-channel DAPI image of dimensions (I, J).
-        threshold (float): Foreground regions with mean DAPI intensity greater than `threshold` are labeled as primary.
-        area_min (float): Minimum area for retaining primary after segmentation.
-        area_max (float): Maximum area for retaining primary after segmentation.
+        threshold (float): Foreground regions with mean DAPI intensity greater than `threshold` are labeled as primary objects.
+        area_min (float): Minimum area for retaining primary objects after segmentation.
+        area_max (float): Maximum area for retaining primary objects after segmentation.
         smooth (float, optional): Size of Gaussian kernel used to smooth the distance map to foreground prior to watershedding. Default is 1.35.
         radius (float, optional): Radius of disk used in local mean thresholding to identify foreground. Default is 15.
 
     Returns:
-        numpy.ndarray: Labeled segmentation mask of primary.
+        numpy.ndarray: Labeled segmentation mask of primary objects.
     """
     # Extract DAPI channel from the input data
     if isinstance(data, list):
@@ -139,7 +139,7 @@ def segment_primary(data, threshold, area_min, area_max, smooth=1.35, radius=15)
     else:
         dapi = data
 
-    # Define keyword arguments for find_primary function
+    # Define keyword arguments for the find_primary function
     kwargs = dict(
         threshold=lambda x: threshold,
         area_min=area_min,
@@ -151,18 +151,18 @@ def segment_primary(data, threshold, area_min, area_max, smooth=1.35, radius=15)
     # Suppress precision warning from skimage
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        # Use find_primary function to segment primary from DAPI channel
+        # Use find_primary to segment primary objects from the DAPI channel
         primary = find_primary(dapi, **kwargs)
 
-    # Calculate the number of segmented primary (excluding background label)
+    # Calculate the number of segmented primary objects (excluding background label)
     num_primary_segmented = len(np.unique(primary)) - 1
-    print(f"Number of primary segmented: {num_primary_segmented}")
+    print(f"Number of primary objects segmented: {num_primary_segmented}")
 
     return primary
 
 
 def segment_cells(data, primary, threshold, add_primary=True):
-    """Segment cells from aligned data and match cell labels to primary labels.
+    """Segment cells from aligned data and match cell labels to primary object labels.
 
     Note that labels can be skipped, for example if cells are touching the
     image boundary.
@@ -171,16 +171,16 @@ def segment_cells(data, primary, threshold, add_primary=True):
         data : np.ndarray
             The aligned image data. Can have 2, 3, or 4 dimensions.
         primary : np.ndarray
-            The segmented primary data.
+            The segmented primary object data.
         threshold : float
             The threshold value for cell segmentation.
         add_primary : bool, default True
-            Whether to add the primary shape to the cell mask to help with mapping
+            Whether to add the primary object shape to the cell mask to help with mapping
             reads to cells at the edge of the field of view.
 
     Returns:
         np.ndarray
-            The segmented cells, with labels matched to primary.
+            The segmented cells, with labels matched to primary objects.
     """
     # Determine the mask based on the number of dimensions in data
     if data.ndim == 4:
@@ -199,7 +199,7 @@ def segment_cells(data, primary, threshold, add_primary=True):
     # Apply the threshold to the mask to create a binary mask
     mask = mask > threshold
 
-    # Add the primary to the mask if add_primary is True
+    # Add the primary object to the mask if add_primary is True
     if add_primary:
         mask += primary.astype(bool)
 
@@ -223,22 +223,22 @@ def segment_cells(data, primary, threshold, add_primary=True):
 
 
 def find_cells(primary, mask, remove_boundary_cells=True):
-    """Convert binary mask to cell labels, based on primary labels.
+    """Convert binary mask to cell labels, based on primary object labels.
 
-    Expands labeled primary to cells, constrained to where mask is >0.
+    Expands labeled primary objects to cells, constrained to where mask is >0.
 
     Args:
-        primary (numpy.ndarray): Labeled segmentation mask of primary.
+        primary (numpy.ndarray): Labeled segmentation mask of primary objects.
         mask (numpy.ndarray): Binary mask indicating valid regions for cell expansion.
         remove_boundary_cells (bool, optional): Whether to remove cells touching the boundary. Default is True.
 
     Returns:
         numpy.ndarray: Labeled segmentation mask of cells.
     """
-    # Calculate distance transform of areas where primary are not present
+    # Calculate distance transform of areas where primary objects are not present
     distance = ndi.distance_transform_cdt(primary == 0)
 
-    # Use watershed segmentation to expand primary labels to cells within the mask
+    # Use watershed segmentation to expand primary object labels to cells within the mask
     cells = watershed(distance, primary, mask=mask)
 
     # Remove cells touching the boundary if specified
@@ -260,20 +260,20 @@ def find_primary(
     score=lambda r: r.mean_intensity,
     smooth=1.35,
 ):
-    """Segment primary from DAPI stain using various parameters and filters.
+    """Segment primary objects from DAPI stain using various parameters and filters.
 
     Args:
         dapi (numpy.ndarray): Input DAPI image.
-        threshold (float or callable): Threshold for mean intensity to segment primary.
+        threshold (float or callable): Threshold for mean intensity to segment primary objects.
                                      If callable, it should take an array of scores and return a threshold.
         radius (int, optional): Radius of disk used in local mean thresholding to identify foreground. Default is 15.
-        area_min (int, optional): Minimum area for retaining primary after segmentation. Default is 50.
-        area_max (int, optional): Maximum area for retaining primary after segmentation. Default is 500.
+        area_min (int, optional): Minimum area for retaining primary objects after segmentation. Default is 50.
+        area_max (int, optional): Maximum area for retaining primary objects after segmentation. Default is 500.
         score (function, optional): Function to calculate region score. Default is lambda r: r.mean_intensity.
         smooth (float, optional): Size of Gaussian kernel used to smooth the distance map to foreground prior to watershedding. Default is 1.35.
 
     Returns:
-        result (numpy.ndarray): Labeled segmentation mask of primary.
+        result (numpy.ndarray): Labeled segmentation mask of primary objects.
     """
     # Binarize DAPI image to identify foreground
     mask = binarize(dapi, radius, area_min)
@@ -297,7 +297,7 @@ def find_primary(
     # Apply watershed algorithm to refine segmentation
     primary = apply_watershed(labeled, smooth=smooth)
 
-    # Filter resulting primary by area range
+    # Filter resulting primary objects by area range
     result = filter_by_region(primary, lambda r: area_min < r.area < area_max, threshold)
 
     return result
