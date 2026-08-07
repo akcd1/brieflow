@@ -126,3 +126,20 @@ def test_no_object_name_leaked_into_library_signatures(module_path, func_name):
 
     leaked = {p for p in params if "vacuole" in p}
     assert not leaked, f"{func_name} hardcodes a display name: {leaked}"
+
+
+def test_count_columns_default_to_historical_plural_names():
+    """With object_name absent, count columns keep their upstream plural names."""
+    from lib.shared.rule_utils import object_plural
+
+    assert object_plural("nucleus") == "nuclei"
+    assert object_plural("vacuole") == "vacuoles"
+
+    import pandas as pd
+
+    counts = pd.DataFrame({"final_primary": [1], "initial_primary": [2], "cells": [3]})
+    plural = object_plural("nucleus")
+    renamed = counts.rename(
+        columns={c: c.replace("primary", plural) for c in counts.columns if "primary" in c}
+    )
+    assert list(renamed.columns) == ["final_nuclei", "initial_nuclei", "cells"]

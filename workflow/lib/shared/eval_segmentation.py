@@ -12,6 +12,7 @@ from lib.shared.eval import plot_plate_heatmap
 from lib.shared.configuration_utils import create_micropanel
 from lib.shared.configuration_utils import image_segmentation_annotations
 from lib.shared.segment_cellpose import prepare_cellpose
+from lib.shared.rule_utils import object_plural
 
 
 def segmentation_overview(segmentation_stats_paths, object_name="nucleus"):
@@ -22,21 +23,24 @@ def segmentation_overview(segmentation_stats_paths, object_name="nucleus"):
     and final primary objects. Aggregates the counts across tiles for each well.
 
     The segmentation stats files already carry the screen's display name in their column
-    names (segment.py renames the neutral "*primary*" keys before writing them out), so
-    `object_name` is accepted here purely to describe/validate that naming, not to rename
-    anything itself.
+    names (segment.py renames the neutral "*primary*" keys before writing them out, using
+    the plural form of `object_name` for count columns), so `object_name` is accepted here
+    purely to describe/validate that naming, not to rename anything itself.
 
     Args:
         segmentation_stats_paths (list of str): List of file paths to segmentation statistics files,
             each containing well and tile segmentation data.
-        object_name (str, optional): Display name for the primary segmented object, matching
-            whatever `segment.py` used when writing the stats files. Defaults to "nucleus".
+        object_name (str, optional): Display name for the primary segmented object (singular),
+            matching whatever `segment.py` used when writing the stats files. Count columns in
+            those files use the plural form (see `lib.shared.rule_utils.object_plural`).
+            Defaults to "nucleus".
 
     Returns:
         pandas.DataFrame: A DataFrame with aggregated segmentation counts for each well.
-            Columns include 'well', f'initial_{object_name}', 'initial_cells',
-            f'after_edge_removal_{object_name}', 'after_edge_removal_cells', 'final_cells',
-            and f'final_{object_name}', with values summed across tiles.
+            Columns include 'well', f'initial_{plural}', 'initial_cells',
+            f'after_edge_removal_{plural}', 'after_edge_removal_cells', 'final_cells',
+            and f'final_{plural}' (where `plural = object_plural(object_name)`), with values
+            summed across tiles.
     """
     # Initialize an empty list to store individual DataFrames
     data_frames = []
@@ -144,12 +148,14 @@ def evaluate_segmentation_paramsearch(
     Args:
         df (pandas.DataFrame): DataFrame containing segmentation results with columns:
             nuclei_diameter, cell_diameter, flow_threshold, cellprob_threshold,
-            f"initial_{object_name}", initial_cells, final_cells, f"final_{object_name}",
-            after_edge_removal_cells, f"after_edge_removal_{object_name}", path
+            f"initial_{plural}", initial_cells, final_cells, f"final_{plural}",
+            after_edge_removal_cells, f"after_edge_removal_{plural}", path
+            (where `plural = object_plural(object_name)`)
         segmentation_process (str, optional): Process type to evaluate.
             Must be either "sbs" or "phenotype". Defaults to "sbs".
-        object_name (str, optional): Display name for the primary segmented object, used to
-            derive the counts column names above. Defaults to "nucleus".
+        object_name (str, optional): Display name (singular) for the primary segmented object,
+            used to derive the plural counts column names above via
+            `lib.shared.rule_utils.object_plural`. Defaults to "nucleus".
         default_cell_diameter (float, optional): Reference cell diameter for comparison.
             If None, only optimal parameters are shown. Defaults to None.
         default_nuclei_diameter (float, optional): Reference nuclei diameter.
@@ -167,8 +173,8 @@ def evaluate_segmentation_paramsearch(
 
     Returns:
         pandas.DataFrame: Statistics grouped by parameter combinations, containing columns:
-            f"initial_{object_name}_mean", initial_cells_mean, final_cells_mean,
-            f"final_{object_name}_mean", cell_retention_mean, f"{object_name}_retention_mean",
+            f"initial_{plural}_mean", initial_cells_mean, final_cells_mean,
+            f"final_{plural}_mean", cell_retention_mean, f"{plural}_retention_mean",
             measurement_count, combined_score
         str: Formatted summary text containing performance metrics for optimal and default parameters
         Micropanel: Visualization comparing optimal and default segmentation results (if defaults provided)
@@ -217,10 +223,13 @@ def evaluate_segmentation_paramsearch(
         "cellprob_threshold",
     ]
 
-    retention_col = f"{object_name}_retention"
-    initial_col = f"initial_{object_name}"
-    final_col = f"final_{object_name}"
-    after_edge_removal_col = f"after_edge_removal_{object_name}"
+    # Count columns (and their derived retention ratio) use the upstream plural
+    # ("final_nuclei"), not the singular object_name used for feature prefixes.
+    plural = object_plural(object_name)
+    retention_col = f"{plural}_retention"
+    initial_col = f"initial_{plural}"
+    final_col = f"final_{plural}"
+    after_edge_removal_col = f"after_edge_removal_{plural}"
 
     df["cell_retention"] = df["final_cells"] / df["after_edge_removal_cells"]
     df[retention_col] = df[final_col] / df[after_edge_removal_col]
@@ -276,9 +285,9 @@ def evaluate_segmentation_paramsearch(
 
     Performance Metrics:
     - Cell Retention: {best_stats["cell_retention_mean"] * 100:.1f}%
-    - {object_name.capitalize()} Retention: {best_stats[retention_mean_col] * 100:.1f}%
+    - {plural.capitalize()} Retention: {best_stats[retention_mean_col] * 100:.1f}%
     - Final Cells (avg): {best_stats["final_cells_mean"]:.0f}
-    - Final {object_name.capitalize()} (avg): {best_stats[final_mean_col]:.0f}
+    - Final {plural.capitalize()} (avg): {best_stats[final_mean_col]:.0f}
     - Number of measurements: {best_stats["measurement_count"]}
     - Combined Score: {best_stats["combined_score"]:.1f}"""
 
@@ -300,9 +309,9 @@ def evaluate_segmentation_paramsearch(
 
     Performance Metrics:
     - Cell Retention: {default_stats["cell_retention_mean"] * 100:.1f}%
-    - {object_name.capitalize()} Retention: {default_stats[retention_mean_col] * 100:.1f}%
+    - {plural.capitalize()} Retention: {default_stats[retention_mean_col] * 100:.1f}%
     - Final Cells (avg): {default_stats["final_cells_mean"]:.0f}
-    - Final {object_name.capitalize()} (avg): {default_stats[final_mean_col]:.0f}
+    - Final {plural.capitalize()} (avg): {default_stats[final_mean_col]:.0f}
     - Number of measurements: {default_stats["measurement_count"]}
     - Combined Score: {default_stats["combined_score"]:.1f}"""
 

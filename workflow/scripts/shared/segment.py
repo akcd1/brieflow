@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 
 from lib.shared.image_io import read_image, save_image
+from lib.shared.rule_utils import object_plural
 
 # Load illumination corrected data
 aligned_data = read_image(snakemake.input[0])
@@ -148,10 +149,12 @@ save_image(primary_data, snakemake.output[0], is_label=True)
 save_image(cells_data, snakemake.output[1], is_label=True)
 
 # The libraries emit neutral "*primary*" keys; the stats file is user-facing,
-# so rename them to whatever this screen calls its object.
+# so rename them to whatever this screen calls its object. Count columns use
+# the plural ("final_nuclei"), matching upstream's irregular vocabulary.
 object_name = params.get("object_name", "nucleus")
+plural = object_plural(object_name)
 counts_df = counts_df.rename(
-    columns={col: col.replace("primary", object_name) for col in counts_df.columns if "primary" in col}
+    columns={col: col.replace("primary", plural) for col in counts_df.columns if "primary" in col}
 )
 
 # Save counts data

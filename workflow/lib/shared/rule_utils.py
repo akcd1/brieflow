@@ -164,6 +164,17 @@ def get_spot_detection_params(config: Dict[str, Any]) -> Dict[str, Any]:
     return params
 
 
+# Upstream vocabulary is irregular: feature prefixes are singular ("nucleus_i")
+# while count columns are plural ("final_nuclei"). One config value cannot
+# produce both by substitution, so the plural is derived explicitly.
+_OBJECT_PLURALS = {"nucleus": "nuclei"}
+
+
+def object_plural(object_name: str) -> str:
+    """Return the plural form of an object name, honouring irregular cases."""
+    return _OBJECT_PLURALS.get(object_name, f"{object_name}s")
+
+
 def get_segmentation_params(module: str, config: Dict[str, Any]) -> Dict[str, Any]:
     """Get segmentation parameters for a specific module.
 
