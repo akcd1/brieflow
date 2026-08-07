@@ -196,3 +196,17 @@ def test_no_hardcoded_object_prefix_in_phenotype_consumers(source_text):
             if '"nucleus_"' in line or '"nucleus"' in line:
                 offenders.append(f"{rel}:{lineno}: {line.strip()}")
         assert not offenders, f"hardcoded object prefix/name survived: {offenders}"
+
+
+def test_label_basename_uses_plural_form():
+    """Label image basenames must use the plural form, in both directions.
+
+    Upstream emits 'nuclei' (never the naive 'nucleuss'); harissa emits
+    'vacuoles'. This pins targets/phenotype.smk's segment_phenotype output
+    path, the single site where a wrong plural would silently rename every
+    label image in the pipeline.
+    """
+    from lib.shared.rule_utils import object_plural
+
+    assert object_plural("nucleus") == "nuclei"  # upstream filenames unchanged
+    assert object_plural("vacuole") == "vacuoles"

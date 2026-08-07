@@ -7,7 +7,7 @@ for _param_name in ["cp_method", "channel_names"]:
 
 # Load inputs
 data_phenotype = read_image(snakemake.input[0])
-nuclei = read_image(snakemake.input[1])
+primary = read_image(snakemake.input[1])
 cells = read_image(snakemake.input[2])
 cytoplasms = read_image(snakemake.input[3])
 
@@ -33,7 +33,7 @@ if cp_method == "cp_measure":
     # extract phenotype features using cp_measure
     phenotype_cp = extract_phenotype_cp_measure(
         data_phenotype=data_phenotype,
-        nuclei=nuclei,
+        nuclei=primary,
         cells=cells,
         cytoplasms=cytoplasms,
         channel_names=snakemake.params.channel_names,
@@ -47,7 +47,7 @@ elif cp_method == "cp_emulator":
     # extract phenotype features using CellProfiler emulator
     phenotype_cp = extract_phenotype_cp_emulator(
         data_phenotype=data_phenotype,
-        nuclei=nuclei,
+        nuclei=primary,
         cells=cells,
         cytoplasms=cytoplasms,
         foci_channel=snakemake.params.foci_channel_index,

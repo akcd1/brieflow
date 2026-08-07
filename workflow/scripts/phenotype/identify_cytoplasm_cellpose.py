@@ -5,8 +5,8 @@ from lib.phenotype.identify_cytoplasm_cellpose import (
 )
 from lib.shared.image_io import read_image, save_image
 
-# Load nuclei and cell segmentation data
-nuclei = read_image(snakemake.input[0])
+# Load primary object and cell segmentation data
+primary = read_image(snakemake.input[0])
 cells = read_image(snakemake.input[1])
 
 # Check if cell segmentation is enabled
@@ -14,10 +14,10 @@ segment_cells = snakemake.params.segment_cells
 
 if segment_cells:
     # identify cytoplasms with cellpose
-    cytoplasms = identify_cytoplasm_cellpose(nuclei, cells)
+    cytoplasms = identify_cytoplasm_cellpose(primary, cells)
 else:
     # write blank array when cell segmentation is disabled
-    cytoplasms = np.zeros_like(nuclei, dtype=np.int32)
+    cytoplasms = np.zeros_like(primary, dtype=np.int32)
 
 # Ensure label array is uint32 (supports >65535 labels; spec-compliant)
 cytoplasms = cytoplasms.astype(np.uint32)
