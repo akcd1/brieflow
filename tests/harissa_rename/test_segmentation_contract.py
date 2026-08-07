@@ -56,13 +56,31 @@ def test_watershed_output_unchanged(synthetic_image):
     golden = np.load(GOLDEN)
     labels = segment_watershed(
         data=synthetic_image,
-        nuclei_threshold=1000,
-        nuclei_area_min=50,
-        nuclei_area_max=5000,
+        primary_threshold=1000,
+        primary_area_min=50,
+        primary_area_max=5000,
         cell_threshold=500,
         cells=False,
     )
     np.testing.assert_array_equal(labels, golden)
+
+
+# Identifiers of ours that must never survive, even on a line that also
+# carries Cellpose nomenclature. The line-level check cannot see these.
+STALE_IDENTIFIERS = [
+    "nuclei_data", "nuclei_diameter", "nuclei_threshold", "nuclei_area_min",
+    "nuclei_area_max", "nuclei_flow_threshold", "nuclei_cellprob_threshold",
+    "nuclei_prob_threshold", "nuclei_nms_threshold", "nuclei_kwargs",
+    "nuclei_model_type", "model_nuclei",
+]
+
+
+@pytest.mark.parametrize("relative_path", SEGMENTATION_LIBS)
+def test_no_stale_object_identifiers(relative_path, source_text):
+    """Token-level check: catches our identifiers hiding on Cellpose lines."""
+    text = source_text(relative_path)
+    found = [ident for ident in STALE_IDENTIFIERS if ident in text]
+    assert not found, f"{relative_path} still has our old identifiers: {found}"
 
 
 def test_all_three_methods_importable():
@@ -70,6 +88,7 @@ def test_all_three_methods_importable():
     pytest.importorskip(
         "stardist",
         reason="brieflow_viso pairs numpy 2.0.2 with a stardist built for the numpy 1.x ABI",
+        exc_type=ImportError,
     )
     from lib.shared.segment_cellpose import segment_cellpose
     from lib.shared.segment_stardist import segment_stardist
@@ -99,6 +118,7 @@ def test_no_object_name_leaked_into_library_signatures(module_path, func_name):
         pytest.importorskip(
             "stardist",
             reason="brieflow_viso pairs numpy 2.0.2 with a stardist built for the numpy 1.x ABI",
+            exc_type=ImportError,
         )
 
     module = importlib.import_module(module_path)

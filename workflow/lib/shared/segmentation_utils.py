@@ -2,7 +2,7 @@
 
 This module provides common functions used across different segmentation methods:
 - image_log_scale: Apply log scaling to images for preprocessing
-- reconcile_nuclei_cells: Reconcile nuclei and cell labels based on overlap
+- reconcile_primary_cells: Reconcile primary object and cell labels based on overlap
 - center_pixels: Assign labels to center pixels of regions
 - relabel_array: Map values in an array based on a label dictionary
 
@@ -99,7 +99,7 @@ def relabel_array(arr, new_label_dict):
     return arr_[arr]  # Return the relabeled array
 
 
-def reconcile_nuclei_cells(nuclei, cells, how="consensus"):
+def reconcile_primary_cells(nuclei, cells, how="consensus"):
     """Reconcile nuclei and cells labels based on their overlap.
 
     Args:
