@@ -65,8 +65,8 @@ def extract_phenotype_cp_emulator(
         channel_names (list, optional): List of channel names used for labeling output
             columns. Default is ["dapi", "tubulin", "gh2ax", "phalloidin"].
         object_name (str, optional): Name of the primary segmented object, used as the
-            column prefix for its features (e.g. "nucleus" -> "nucleus_area"). Default
-            is "nucleus".
+            column prefix for its features (e.g. nucleus becomes nucleus_area). Defaults
+            to nucleus.
 
     Returns:
         pandas.DataFrame: DataFrame containing extracted features with columns ordered as:
@@ -249,7 +249,7 @@ def order_dataframe_columns(
         metadata_cols (list): List of metadata column names to put first
         label_col (str): Name of the label column
         object_name (str, optional): Name of the primary segmented object, used to
-            identify its feature columns. Default is "nucleus".
+            identify its feature columns. Defaults to nucleus.
 
     Returns:
         pandas.DataFrame: DataFrame with reordered columns

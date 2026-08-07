@@ -113,6 +113,7 @@ rule merge_phenotype:
     params:
         channel_names=config.get("phenotype", {}).get("channel_names"),
         segment_cells=config.get("phenotype", {}).get("segment_cells", True),
+        object_name=config.get("phenotype", {}).get("object_name", "nucleus"),
     output:
         PHENOTYPE_OUTPUTS_MAPPED["merge_phenotype"],
     script:

@@ -170,3 +170,29 @@ def test_feature_prefix_is_not_hardcoded(source_text):
     emulator = source_text("lib/phenotype/extract_phenotype_cp_emulator.py")
     assert 'add_prefix("nucleus_")' not in emulator, "prefix still hardcoded"
     assert 'add_prefix(f"{object_name}_")' in emulator
+
+
+# A signature default of the form `object_name: str = "nucleus"` is the
+# legitimate, backward-compatible fallback established by Task 6 -- it is
+# not a hardcoded *usage* of the object name. Everything else quoting
+# "nucleus" or "nucleus_" in these files is a regression: it means some code
+# path selects/labels columns without going through object_name, which is
+# exactly the bug that crashed merge_phenotype.py under harissa's config.
+ALLOWED_NUCLEUS_DEFAULT = 'object_name: str = "nucleus"'
+
+
+def test_no_hardcoded_object_prefix_in_phenotype_consumers(source_text):
+    """Every consumer of the prefixed columns must derive the name, not hardcode it."""
+    for rel in [
+        "lib/phenotype/extract_phenotype_cp_emulator.py",
+        "lib/phenotype/extract_phenotype_cp_measure.py",
+        "scripts/phenotype/merge_phenotype.py",
+    ]:
+        text = source_text(rel)
+        offenders = []
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if ALLOWED_NUCLEUS_DEFAULT in line:
+                continue
+            if '"nucleus_"' in line or '"nucleus"' in line:
+                offenders.append(f"{rel}:{lineno}: {line.strip()}")
+        assert not offenders, f"hardcoded object prefix/name survived: {offenders}"

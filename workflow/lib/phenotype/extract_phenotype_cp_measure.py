@@ -21,6 +21,7 @@ from cp_measure.multimask import (
     measureobjectneighbors,
     measureobjectoverlap,
 )  # contains neighbor, overlap measurements -- more specialized than the bulk ones.
+from lib.shared.rule_utils import object_plural
 
 
 # low level feature extraction - uses cp_measure.bulk.get_core_measurements() to get all basic measurements like intensity, texture, shape, etc.
@@ -137,7 +138,7 @@ def extract_phenotype_cp_measure(
         cytoplasms (np.ndarray, optional): Cytoplasm segmentation mask
         channel_names (list, optional): List of channel names
         object_name (str, optional): Name of the primary segmented object, used as the
-            feature-column label in place of "nucleus". Default is "nucleus".
+            feature-column label in place of nucleus. Defaults to nucleus.
         wildcards (dict, optional): Snakemake wildcards
 
     Returns:
@@ -147,7 +148,7 @@ def extract_phenotype_cp_measure(
     if not isinstance(data_phenotype, np.ndarray) or data_phenotype.ndim != 3:
         raise ValueError("data_phenotype must be 3D array (channels, height, width)")
     for mask, mask_name in [
-        (nuclei, f"{object_name}s"),
+        (nuclei, object_plural(object_name)),
         (cells, "cells"),
         (cytoplasms, "cytoplasms"),
     ]:
