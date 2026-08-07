@@ -19,6 +19,7 @@ from iohub.ngff.display import channel_display_settings
 from iohub.ngff.models import OMEROMeta, RDefsMeta, TransformationMeta
 
 from lib.shared.image_io import DEFAULT_CHANNEL_COLORS
+from lib.shared.rule_utils import object_plural, _cfg
 
 
 # ---------------------------------------------------------------------------
@@ -898,31 +899,50 @@ def _patch_label_versions(store_path: Path) -> None:
 # Helpers — segmentation metadata
 # ---------------------------------------------------------------------------
 
+# The primary object's config keys were renamed from nuclei_* to primary_*.
+# modality_config passed into this module is the raw config section (not run
+# through get_segmentation_params()), so it needs the same legacy-key
+# fallback -- see rule_utils._cfg and rule_utils.get_segmentation_params.
+_LEGACY_PRIMARY_KEYS = {
+    "primary_diameter": "nuclei_diameter",
+    "primary_flow_threshold": "nuclei_flow_threshold",
+    "primary_cellprob_threshold": "nuclei_cellprob_threshold",
+}
+
+
 # Maps label directory stem to (annotation_type, config key for diameter,
 # config key for source channel index).
-_LABEL_ANNOTATION_MAP = {
-    "nuclei": {
-        "annotation_type": "nucleus",
-        "diameter_key": "nuclei_diameter",
-        "source_channel_key": "dapi_index",
-        "flow_threshold_key": "nuclei_flow_threshold",
-        "cellprob_threshold_key": "nuclei_cellprob_threshold",
-    },
-    "cells": {
-        "annotation_type": "cell",
-        "diameter_key": "cell_diameter",
-        "source_channel_key": "cyto_index",
-        "flow_threshold_key": "cell_flow_threshold",
-        "cellprob_threshold_key": "cell_cellprob_threshold",
-    },
-    "identified_cytoplasms": {
-        "annotation_type": "cytoplasm",
-        "diameter_key": None,
-        "source_channel_key": "cyto_index",
-        "flow_threshold_key": None,
-        "cellprob_threshold_key": None,
-    },
-}
+#
+# The primary object's label store is named after ``object_plural(object_name)``
+# (e.g. "nuclei" by default, "vacuoles" for this screen) -- never the literal
+# "nuclei" -- so the map is built per-call from the modality config rather
+# than hardcoded at module scope. See object_plural() in rule_utils.py for
+# why the plural must be derived rather than string-substituted.
+def _label_annotation_map(object_name: str) -> dict:
+    primary_stem = object_plural(object_name)
+    return {
+        primary_stem: {
+            "annotation_type": object_name,
+            "diameter_key": "primary_diameter",
+            "source_channel_key": "dapi_index",
+            "flow_threshold_key": "primary_flow_threshold",
+            "cellprob_threshold_key": "primary_cellprob_threshold",
+        },
+        "cells": {
+            "annotation_type": "cell",
+            "diameter_key": "cell_diameter",
+            "source_channel_key": "cyto_index",
+            "flow_threshold_key": "cell_flow_threshold",
+            "cellprob_threshold_key": "cell_cellprob_threshold",
+        },
+        "identified_cytoplasms": {
+            "annotation_type": "cytoplasm",
+            "diameter_key": None,
+            "source_channel_key": "cyto_index",
+            "flow_threshold_key": None,
+            "cellprob_threshold_key": None,
+        },
+    }
 
 
 def _build_segmentation_meta_for_label(
@@ -935,7 +955,9 @@ def _build_segmentation_meta_for_label(
     Returns *None* when the label name is unrecognised or there is
     insufficient config to build the block.
     """
-    info = _LABEL_ANNOTATION_MAP.get(label_stem)
+    object_name = modality_config.get("object_name", "nucleus")
+    label_map = _label_annotation_map(object_name)
+    info = label_map.get(label_stem)
     if info is None:
         return None
 
@@ -967,13 +989,25 @@ def _build_segmentation_meta_for_label(
                             bio[k] = v
                 break
 
-    # Segmentation parameters (only non-None values)
+    # Segmentation parameters (only non-None values). The primary object's
+    # keys (primary_diameter/primary_flow_threshold/primary_cellprob_threshold)
+    # were renamed from nuclei_*; modality_config here is the raw config
+    # section, so a config written before the rename still needs the same
+    # legacy fallback as get_segmentation_params() (see rule_utils._cfg).
     params = {}
     has_flow = has_cellprob = False
     for pkey in ("diameter_key", "flow_threshold_key", "cellprob_threshold_key"):
         cfg_key = info.get(pkey)
-        if cfg_key and modality_config.get(cfg_key) is not None:
-            params[cfg_key] = modality_config[cfg_key]
+        if not cfg_key:
+            continue
+        legacy_key = _LEGACY_PRIMARY_KEYS.get(cfg_key)
+        value = (
+            _cfg(modality_config, cfg_key, legacy_key, None)
+            if legacy_key
+            else modality_config.get(cfg_key)
+        )
+        if value is not None:
+            params[cfg_key] = value
             if "flow" in pkey:
                 has_flow = True
             if "cellprob" in pkey:
@@ -1019,6 +1053,35 @@ def _patch_segmentation_metadata(
         # label_dir.name is e.g. "nuclei.zarr" → stem is "nuclei"
         label_stem = label_dir.name.replace(".zarr", "")
 
+        # Count labeled objects from the full-resolution array *before*
+        # building/writing metadata. When segment_cells=False, "cells" and
+        # "identified_cytoplasms" are written as all-zero placeholder
+        # arrays -- no segmentation ever ran on them. Writing a metadata
+        # block for those would claim a real segmentation (e.g.
+        # "method": "cellpose.cyto3", n_cells: 0) that never happened, which
+        # is worse than writing nothing. We can't distinguish "placeholder"
+        # from "a real scan that legitimately found zero objects" by array
+        # contents alone, so we treat any all-zero label array as absent and
+        # skip writing segmentation_metadata for it -- an omitted block is
+        # honest; a populated one risks being actively misleading.
+        n_cells = None
+        arr_zj = label_dir / "0" / "zarr.json"
+        if arr_zj.exists():
+            try:
+                import zarr
+
+                arr = zarr.open(str(label_dir / "0"), mode="r")
+                n_cells = int(len(np.unique(arr[:])) - 1)  # exclude background (0)
+            except Exception:
+                pass
+
+        if n_cells == 0:
+            print(
+                f"[patch] skipping segmentation_metadata for all-zero (placeholder) "
+                f"label: {label_stem} in {label_dir}"
+            )
+            continue
+
         seg_meta = _build_segmentation_meta_for_label(
             label_stem, modality_config, channels_metadata
         )
@@ -1030,17 +1093,6 @@ def _patch_segmentation_metadata(
         except Exception:
             continue
 
-        # Count labeled objects from the full-resolution array
-        n_cells = None
-        arr_zj = label_dir / "0" / "zarr.json"
-        if arr_zj.exists():
-            try:
-                import zarr
-
-                arr = zarr.open(str(label_dir / "0"), mode="r")
-                n_cells = int(len(np.unique(arr[:])) - 1)  # exclude background (0)
-            except Exception:
-                pass
         if n_cells is not None:
             seg_meta["statistics"] = {"n_cells": n_cells}
 

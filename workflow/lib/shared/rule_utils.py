@@ -3,7 +3,8 @@
 from pathlib import Path
 import re
 import glob
-from typing import Dict, List, Any, Union
+import warnings
+from typing import Dict, List, Any, Union, Optional
 import pandas as pd
 
 from lib.shared.file_utils import parse_filename
@@ -175,6 +176,32 @@ def object_plural(object_name: str) -> str:
     return _OBJECT_PLURALS.get(object_name, f"{object_name}s")
 
 
+def _cfg(
+    module_config: Dict[str, Any],
+    new_key: str,
+    legacy_key: str,
+    default: Optional[Any] = None,
+) -> Any:
+    """Read *new_key* from a module config, falling back to a pre-rename key.
+
+    Configs written before the ``nuclei_*`` -> ``primary_*`` rename still use
+    the legacy key names. Silently returning ``default`` in that case (what
+    ``.get()`` used to do) makes segmentation quietly diverge from what the
+    user configured, with no error. Falling back to the legacy key preserves
+    behavior; the warning ensures the substitution is never silent.
+    """
+    if new_key in module_config:
+        return module_config[new_key]
+    if legacy_key in module_config:
+        warnings.warn(
+            f"Config uses legacy key '{legacy_key}'; rename it to '{new_key}'. "
+            "Support for the legacy name will be removed.",
+            stacklevel=2,
+        )
+        return module_config[legacy_key]
+    return default
+
+
 def get_segmentation_params(module: str, config: Dict[str, Any]) -> Dict[str, Any]:
     """Get segmentation parameters for a specific module.
 
@@ -207,27 +234,37 @@ def get_segmentation_params(module: str, config: Dict[str, Any]) -> Dict[str, An
 
     # Method-specific parameters
     if segmentation_method == "cellpose":
+        # Shared flow/cellprob defaults, used both directly and as the
+        # fallback layer beneath the primary_*/cell_* specific keys.
+        shared_flow_threshold = module_config.get("flow_threshold", 0.4)
+        shared_cellprob_threshold = module_config.get("cellprob_threshold", 0)
         params.update(
             {
                 "cellpose_model": module_config.get("cellpose_model", "cyto3"),
                 "helper_index": module_config.get("helper_index"),
-                "primary_diameter": module_config.get("primary_diameter"),
-                "cell_diameter": module_config.get("cell_diameter"),
-                "flow_threshold": module_config.get("flow_threshold", 0.4),
-                "cellprob_threshold": module_config.get("cellprob_threshold", 0),
-                "primary_flow_threshold": module_config.get(
-                    "primary_flow_threshold", module_config.get("flow_threshold", 0.4)
+                "primary_diameter": _cfg(
+                    module_config, "primary_diameter", "nuclei_diameter", None
                 ),
-                "primary_cellprob_threshold": module_config.get(
+                "cell_diameter": module_config.get("cell_diameter"),
+                "flow_threshold": shared_flow_threshold,
+                "cellprob_threshold": shared_cellprob_threshold,
+                "primary_flow_threshold": _cfg(
+                    module_config,
+                    "primary_flow_threshold",
+                    "nuclei_flow_threshold",
+                    shared_flow_threshold,
+                ),
+                "primary_cellprob_threshold": _cfg(
+                    module_config,
                     "primary_cellprob_threshold",
-                    module_config.get("cellprob_threshold", 0),
+                    "nuclei_cellprob_threshold",
+                    shared_cellprob_threshold,
                 ),
                 "cell_flow_threshold": module_config.get(
-                    "cell_flow_threshold", module_config.get("flow_threshold", 0.4)
+                    "cell_flow_threshold", shared_flow_threshold
                 ),
                 "cell_cellprob_threshold": module_config.get(
-                    "cell_cellprob_threshold",
-                    module_config.get("cellprob_threshold", 0),
+                    "cell_cellprob_threshold", shared_cellprob_threshold
                 ),
             }
         )
@@ -237,10 +274,15 @@ def get_segmentation_params(module: str, config: Dict[str, Any]) -> Dict[str, An
                 "stardist_model": module_config.get(
                     "stardist_model", "2D_versatile_fluo"
                 ),
-                "primary_prob_threshold": module_config.get(
-                    "primary_prob_threshold", 0.479071
+                "primary_prob_threshold": _cfg(
+                    module_config,
+                    "primary_prob_threshold",
+                    "nuclei_prob_threshold",
+                    0.479071,
                 ),
-                "primary_nms_threshold": module_config.get("primary_nms_threshold", 0.3),
+                "primary_nms_threshold": _cfg(
+                    module_config, "primary_nms_threshold", "nuclei_nms_threshold", 0.3
+                ),
                 "cell_prob_threshold": module_config.get(
                     "cell_prob_threshold", 0.479071
                 ),
@@ -251,8 +293,12 @@ def get_segmentation_params(module: str, config: Dict[str, Any]) -> Dict[str, An
         params.update(
             {
                 "threshold_dapi": module_config.get("threshold_dapi", 4260),
-                "primary_area_min": module_config.get("primary_area_min", 45),
-                "primary_area_max": module_config.get("primary_area_max", 450),
+                "primary_area_min": _cfg(
+                    module_config, "primary_area_min", "nuclei_area_min", 45
+                ),
+                "primary_area_max": _cfg(
+                    module_config, "primary_area_max", "nuclei_area_max", 450
+                ),
                 "threshold_cell": module_config.get("threshold_cell", 1300),
             }
         )

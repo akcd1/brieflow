@@ -17,4 +17,4 @@ done
 snakemake --use-conda --cores all \
     --snakefile "../../workflow/Snakefile" \
     --configfile $CONFIGFILES \
-    --until all_preprocess all_sbs all_phenotype all_merge all_aggregate all_cluster
+    --until all_preprocess all_phenotype

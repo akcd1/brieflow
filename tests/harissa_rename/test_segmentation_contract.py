@@ -218,3 +218,263 @@ def test_object_plural_handles_the_irregular_case():
 
     assert object_plural("nucleus") == "nuclei"
     assert object_plural("vacuole") == "vacuoles"
+
+
+# ---------------------------------------------------------------------------
+# Regression tests: independent review CRITICAL 1 & CRITICAL 2
+#
+# CRITICAL 1: get_segmentation_params() read only the post-rename primary_*
+# keys. A config still written with the pre-rename nuclei_* keys silently
+# got None / a hardcoded default back from .get() -- segmentation params
+# differed from what the user configured, with no error.
+#
+# CRITICAL 2: the OME-Zarr segmentation_metadata map was keyed on the
+# literal "nuclei", so with object_name="vacuole" the real primary label
+# store (vacuoles.zarr) got no metadata at all, while all-zero placeholder
+# "cells"/"identified_cytoplasms" stores (written when segment_cells=False)
+# got metadata claiming a cell segmentation that never ran.
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_diameter_key_still_resolves_with_warning():
+    """A pre-rename config (nuclei_diameter) must still work, loudly."""
+    import warnings
+
+    from lib.shared.rule_utils import get_segmentation_params
+
+    legacy_config = {
+        "phenotype": {
+            "segmentation_method": "cellpose",
+            "object_name": "vacuole",
+            "nuclei_diameter": 41.97813156768016,
+            "nuclei_flow_threshold": 0.4,
+            "nuclei_cellprob_threshold": 0.0,
+        }
+    }
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        params = get_segmentation_params("phenotype", legacy_config)
+
+    assert params["primary_diameter"] == 41.97813156768016
+    assert params["primary_flow_threshold"] == 0.4
+    assert params["primary_cellprob_threshold"] == 0.0
+
+    messages = [str(w.message) for w in caught]
+    assert any(
+        "nuclei_diameter" in m and "primary_diameter" in m for m in messages
+    ), f"no warning naming both keys was emitted: {messages}"
+
+
+def test_bundled_config_primary_diameter_resolves_not_none():
+    """The repo's own bundled test config still uses nuclei_diameter (line
+    194 of tests/small_test_analysis/config/config.yml). Before the fix,
+    get_segmentation_params returned primary_diameter=None here and Cellpose
+    silently auto-sized instead of using the configured 41.978um diameter.
+    """
+    from pathlib import Path
+
+    import yaml
+
+    from lib.shared.rule_utils import get_segmentation_params
+
+    config_fp = (
+        Path(__file__).resolve().parents[1]
+        / "small_test_analysis"
+        / "config"
+        / "config.yml"
+    )
+    with open(config_fp) as f:
+        config = yaml.safe_load(f)
+
+    params = get_segmentation_params("phenotype", config)
+    assert params["primary_diameter"] == pytest.approx(41.97813156768016)
+
+
+def test_watershed_area_bounds_use_legacy_key_not_silent_default():
+    """Watershed's primary_area_min/max must fall back to nuclei_area_min/max,
+    not silently drop to the 45/450 hardcoded defaults.
+    """
+    from lib.shared.rule_utils import get_segmentation_params
+
+    config = {
+        "phenotype": {
+            "segmentation_method": "watershed",
+            "nuclei_area_min": 12,
+            "nuclei_area_max": 999,
+        }
+    }
+    params = get_segmentation_params("phenotype", config)
+    assert params["primary_area_min"] == 12
+    assert params["primary_area_max"] == 999
+
+
+def test_primary_store_recognized_under_nondefault_object_name():
+    """With object_name='vacuole', the primary label store is 'vacuoles.zarr'
+    (stem 'vacuoles'), never the literal 'nuclei'.
+    """
+    pytest.importorskip(
+        "iohub",
+        reason="iohub not installed in the borrowed brieflow_viso test env; "
+        "lib.shared.hcs needs it for OME-Zarr metadata patching",
+        exc_type=ModuleNotFoundError,
+    )
+    from lib.shared.hcs import _build_segmentation_meta_for_label
+
+    modality_config = {
+        "object_name": "vacuole",
+        "segmentation_method": "cellpose",
+        "cellpose_model": "cyto3",
+        "dapi_index": 0,
+        "primary_diameter": 41.978,
+    }
+
+    # The literal "nuclei" must NOT match once object_name is renamed --
+    # this is the object that was never segmented under this config.
+    assert _build_segmentation_meta_for_label("nuclei", modality_config, None) is None
+
+    meta = _build_segmentation_meta_for_label("vacuoles", modality_config, None)
+    assert meta is not None
+    assert meta["annotation_type"] == "vacuole"
+    assert meta["segmentation"]["parameters"]["primary_diameter"] == 41.978
+
+
+def test_default_object_name_diameter_parameters_populated():
+    """Even the unrenamed default case was broken: diameter_key pointed at
+    the pre-rename config key ('nuclei_diameter'), so `parameters` came back
+    empty. Prove it is now populated for the default object_name too.
+    """
+    pytest.importorskip(
+        "iohub",
+        reason="iohub not installed in the borrowed brieflow_viso test env; "
+        "lib.shared.hcs needs it for OME-Zarr metadata patching",
+        exc_type=ModuleNotFoundError,
+    )
+    from lib.shared.hcs import _build_segmentation_meta_for_label
+
+    modality_config = {
+        "segmentation_method": "cellpose",
+        "cellpose_model": "cyto3",
+        "dapi_index": 0,
+        "primary_diameter": 9.5,
+    }
+    meta = _build_segmentation_meta_for_label("nuclei", modality_config, None)
+    assert meta["segmentation"]["parameters"]["primary_diameter"] == 9.5
+
+
+def test_hcs_metadata_resolves_legacy_diameter_key_too():
+    """hcs.py receives the raw config section (not run through
+    get_segmentation_params), so it needs the same nuclei_* legacy fallback
+    independently.
+    """
+    pytest.importorskip(
+        "iohub",
+        reason="iohub not installed in the borrowed brieflow_viso test env; "
+        "lib.shared.hcs needs it for OME-Zarr metadata patching",
+        exc_type=ModuleNotFoundError,
+    )
+    from lib.shared.hcs import _build_segmentation_meta_for_label
+
+    modality_config = {
+        "segmentation_method": "cellpose",
+        "cellpose_model": "cyto3",
+        "dapi_index": 0,
+        "nuclei_diameter": 41.97813156768016,
+    }
+    meta = _build_segmentation_meta_for_label("nuclei", modality_config, None)
+    assert (
+        meta["segmentation"]["parameters"]["primary_diameter"]
+        == 41.97813156768016
+    )
+
+
+def test_placeholder_allzero_label_gets_no_segmentation_metadata(tmp_path):
+    """cells/identified_cytoplasms are written as all-zero placeholder
+    arrays when segment_cells=False. They must not be tagged with metadata
+    claiming a real segmentation happened.
+    """
+    pytest.importorskip(
+        "iohub",
+        reason="iohub not installed in the borrowed brieflow_viso test env; "
+        "lib.shared.hcs needs it for OME-Zarr metadata patching",
+        exc_type=ModuleNotFoundError,
+    )
+    import json
+
+    import zarr
+
+    from lib.shared.hcs import _patch_segmentation_metadata
+
+    store_path = tmp_path / "aligned_1.zarr"
+    label_dir = store_path / "A" / "1" / "0" / "labels" / "cells.zarr"
+    arr_dir = label_dir / "0"
+    label_dir.mkdir(parents=True, exist_ok=True)
+
+    (label_dir / "zarr.json").write_text(
+        json.dumps(
+            {
+                "zarr_format": 3,
+                "node_type": "group",
+                "attributes": {"ome": {"image-label": {"version": "0.5"}}},
+            }
+        )
+    )
+
+    z = zarr.open(str(arr_dir), mode="w", shape=(8, 8), dtype="uint16")
+    z[:] = 0
+
+    modality_config = {"segmentation_method": "cellpose", "segment_cells": False}
+    _patch_segmentation_metadata(store_path, modality_config, None)
+
+    meta = json.loads((label_dir / "zarr.json").read_text())
+    assert "segmentation_metadata" not in meta.get("attributes", {})
+
+
+def test_real_segmentation_label_still_gets_metadata(tmp_path):
+    """Sanity check: a label store with real (non-zero) objects still gets
+    segmentation_metadata written, so the all-zero skip isn't overbroad.
+    """
+    pytest.importorskip(
+        "iohub",
+        reason="iohub not installed in the borrowed brieflow_viso test env; "
+        "lib.shared.hcs needs it for OME-Zarr metadata patching",
+        exc_type=ModuleNotFoundError,
+    )
+    import json
+
+    import zarr
+
+    from lib.shared.hcs import _patch_segmentation_metadata
+
+    store_path = tmp_path / "aligned_1.zarr"
+    label_dir = store_path / "A" / "1" / "0" / "labels" / "vacuoles.zarr"
+    arr_dir = label_dir / "0"
+    label_dir.mkdir(parents=True, exist_ok=True)
+
+    (label_dir / "zarr.json").write_text(
+        json.dumps(
+            {
+                "zarr_format": 3,
+                "node_type": "group",
+                "attributes": {"ome": {"image-label": {"version": "0.5"}}},
+            }
+        )
+    )
+
+    z = zarr.open(str(arr_dir), mode="w", shape=(4, 4), dtype="uint16")
+    z[0:2, 0:2] = 1
+    z[2:4, 2:4] = 2
+
+    modality_config = {
+        "object_name": "vacuole",
+        "segmentation_method": "cellpose",
+        "cellpose_model": "cyto3",
+        "dapi_index": 0,
+        "primary_diameter": 41.978,
+    }
+    _patch_segmentation_metadata(store_path, modality_config, None)
+
+    meta = json.loads((label_dir / "zarr.json").read_text())
+    seg_meta = meta["attributes"]["segmentation_metadata"]
+    assert seg_meta["annotation_type"] == "vacuole"
+    assert seg_meta["statistics"]["n_cells"] == 2
