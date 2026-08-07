@@ -198,15 +198,23 @@ def test_no_hardcoded_object_prefix_in_phenotype_consumers(source_text):
         assert not offenders, f"hardcoded object prefix/name survived: {offenders}"
 
 
-def test_label_basename_uses_plural_form():
-    """Label image basenames must use the plural form, in both directions.
+def test_label_basename_derives_from_config():
+    """The segment_phenotype label output must derive its name, not hardcode it."""
+    import pathlib
 
-    Upstream emits 'nuclei' (never the naive 'nucleuss'); harissa emits
-    'vacuoles'. This pins targets/phenotype.smk's segment_phenotype output
-    path, the single site where a wrong plural would silently rename every
-    label image in the pipeline.
-    """
+    targets = (
+        pathlib.Path(__file__).resolve().parents[2] / "workflow" / "targets" / "phenotype.smk"
+    ).read_text()
+
+    assert "object_plural(object_name)" in targets, (
+        "label basename no longer derives from object_name"
+    )
+    assert '"nuclei"' not in targets, "label basename is hardcoded again"
+
+
+def test_object_plural_handles_the_irregular_case():
+    """nucleus -> nuclei, not nucleuss; the reason the helper exists."""
     from lib.shared.rule_utils import object_plural
 
-    assert object_plural("nucleus") == "nuclei"  # upstream filenames unchanged
+    assert object_plural("nucleus") == "nuclei"
     assert object_plural("vacuole") == "vacuoles"
