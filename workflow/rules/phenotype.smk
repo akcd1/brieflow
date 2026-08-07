@@ -142,6 +142,8 @@ rule eval_segmentation_phenotype:
             expansion_values=_phen_well_expand,
             metadata_combos=phenotype_wildcard_combos,
         ),
+    params:
+        object_name=config.get("phenotype", {}).get("object_name", "nucleus"),
     output:
         PHENOTYPE_OUTPUTS_MAPPED["eval_segmentation_phenotype"],
     script:

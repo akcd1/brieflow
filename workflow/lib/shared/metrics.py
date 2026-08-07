@@ -159,11 +159,13 @@ def get_phenotype_stats(config):
 
         if seg_dfs:
             seg_combined = pd.concat(seg_dfs)
-            # Sum the final_cells column to get total cells (fallback to final_primary if needed)
+            # Sum the final_cells column to get total cells (fallback to the
+            # screen's primary-object column if needed)
+            object_name = config.get("phenotype", {}).get("object_name", "nucleus")
             if "final_cells" in seg_combined.columns:
                 total_cells = seg_combined["final_cells"].sum()
-            elif "final_primary" in seg_combined.columns:
-                total_cells = seg_combined["final_primary"].sum()
+            elif f"final_{object_name}" in seg_combined.columns:
+                total_cells = seg_combined[f"final_{object_name}"].sum()
             else:
                 total_cells = 0
 

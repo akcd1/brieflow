@@ -185,6 +185,7 @@ def get_segmentation_params(module: str, config: Dict[str, Any]) -> Dict[str, An
     # Common parameters for all methods
     params = {
         "segmentation_method": segmentation_method,
+        "object_name": module_config.get("object_name", "nucleus"),
         "dapi_index": module_config.get("dapi_index"),
         "cyto_index": module_config.get("cyto_index"),
         "reconcile": module_config.get("reconcile", False),
@@ -199,15 +200,15 @@ def get_segmentation_params(module: str, config: Dict[str, Any]) -> Dict[str, An
             {
                 "cellpose_model": module_config.get("cellpose_model", "cyto3"),
                 "helper_index": module_config.get("helper_index"),
-                "nuclei_diameter": module_config.get("nuclei_diameter"),
+                "primary_diameter": module_config.get("primary_diameter"),
                 "cell_diameter": module_config.get("cell_diameter"),
                 "flow_threshold": module_config.get("flow_threshold", 0.4),
                 "cellprob_threshold": module_config.get("cellprob_threshold", 0),
-                "nuclei_flow_threshold": module_config.get(
-                    "nuclei_flow_threshold", module_config.get("flow_threshold", 0.4)
+                "primary_flow_threshold": module_config.get(
+                    "primary_flow_threshold", module_config.get("flow_threshold", 0.4)
                 ),
-                "nuclei_cellprob_threshold": module_config.get(
-                    "nuclei_cellprob_threshold",
+                "primary_cellprob_threshold": module_config.get(
+                    "primary_cellprob_threshold",
                     module_config.get("cellprob_threshold", 0),
                 ),
                 "cell_flow_threshold": module_config.get(
@@ -225,10 +226,10 @@ def get_segmentation_params(module: str, config: Dict[str, Any]) -> Dict[str, An
                 "stardist_model": module_config.get(
                     "stardist_model", "2D_versatile_fluo"
                 ),
-                "nuclei_prob_threshold": module_config.get(
-                    "nuclei_prob_threshold", 0.479071
+                "primary_prob_threshold": module_config.get(
+                    "primary_prob_threshold", 0.479071
                 ),
-                "nuclei_nms_threshold": module_config.get("nuclei_nms_threshold", 0.3),
+                "primary_nms_threshold": module_config.get("primary_nms_threshold", 0.3),
                 "cell_prob_threshold": module_config.get(
                     "cell_prob_threshold", 0.479071
                 ),
@@ -239,8 +240,8 @@ def get_segmentation_params(module: str, config: Dict[str, Any]) -> Dict[str, An
         params.update(
             {
                 "threshold_dapi": module_config.get("threshold_dapi", 4260),
-                "nuclei_area_min": module_config.get("nuclei_area_min", 45),
-                "nuclei_area_max": module_config.get("nuclei_area_max", 450),
+                "primary_area_min": module_config.get("primary_area_min", 45),
+                "primary_area_max": module_config.get("primary_area_max", 450),
                 "threshold_cell": module_config.get("threshold_cell", 1300),
             }
         )
