@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 
 import skimage
-from skimage.measure import label
+from skimage.measure import label, regionprops
 from skimage.segmentation import clear_border, watershed, relabel_sequential
 from skimage.morphology import (
     disk,
