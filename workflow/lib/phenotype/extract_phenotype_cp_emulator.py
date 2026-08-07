@@ -186,7 +186,9 @@ def extract_phenotype_cp_emulator(
     # Extract foci features if foci channel is provided
     # Use cells if available, otherwise fall back to nuclei
     if foci_channel is not None:
-        foci_mask = cells if (cells is not None and np.sum(cells) > 0) else nuclei
+        use_cells = cells is not None and np.sum(cells) > 0
+        foci_mask = cells if use_cells else nuclei
+        foci_prefix = "cell_" if use_cells else f"{object_name}_"
 
         # Normalize to list for consistent handling
         if isinstance(foci_channel, int):
@@ -199,7 +201,7 @@ def extract_phenotype_cp_emulator(
             dfs.append(
                 extract_features_bare(foci, foci_mask, features=foci_features)
                 .set_index("label")
-                .add_prefix(f"cell_{channel_names[fc]}_")
+                .add_prefix(f"{foci_prefix}{channel_names[fc]}_")
             )
 
     # Extract nucleus neighbors
