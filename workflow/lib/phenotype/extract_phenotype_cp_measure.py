@@ -126,6 +126,7 @@ def extract_phenotype_cp_measure(
     cells,
     cytoplasms=None,
     channel_names=None,
+    object_name: str = "nucleus",
 ):
     """Extract comprehensive phenotype features using cp_measure.
 
@@ -135,6 +136,8 @@ def extract_phenotype_cp_measure(
         cells (np.ndarray): Cell segmentation mask
         cytoplasms (np.ndarray, optional): Cytoplasm segmentation mask
         channel_names (list, optional): List of channel names
+        object_name (str, optional): Name of the primary segmented object, used as the
+            feature-column label in place of "nucleus". Default is "nucleus".
         wildcards (dict, optional): Snakemake wildcards
 
     Returns:
@@ -144,7 +147,7 @@ def extract_phenotype_cp_measure(
     if not isinstance(data_phenotype, np.ndarray) or data_phenotype.ndim != 3:
         raise ValueError("data_phenotype must be 3D array (channels, height, width)")
     for mask, mask_name in [
-        (nuclei, "nuclei"),
+        (nuclei, f"{object_name}s"),
         (cells, "cells"),
         (cytoplasms, "cytoplasms"),
     ]:
@@ -181,7 +184,7 @@ def extract_phenotype_cp_measure(
 
             # Process each mask type if it contains objects
             for mask, mask_name in [
-                (nuclei, "nucleus"),
+                (nuclei, object_name),
                 (cells, "cell"),
                 (cytoplasms, "cytoplasm"),
             ]:
@@ -201,7 +204,7 @@ def extract_phenotype_cp_measure(
             ch2_data = data_phenotype[ch2_idx]
 
             for mask, mask_name in [
-                (nuclei, "nucleus"),
+                (nuclei, object_name),
                 (cells, "cell"),
                 (cytoplasms, "cytoplasm"),
             ]:
@@ -219,7 +222,7 @@ def extract_phenotype_cp_measure(
         print("Computing neighbor features...")
         # Process each mask pair if both contain objects
         mask_pairs = [
-            (nuclei, nuclei, "nucleus"),
+            (nuclei, nuclei, object_name),
             (cytoplasms, cytoplasms, "cytoplasm"),
             (cells, cells, "cell"),
         ]

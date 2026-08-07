@@ -22,7 +22,7 @@ from lib.external.cp_emulator import (
 )
 from lib.shared.feature_extraction import extract_features, extract_features_bare
 from lib.shared.log_filter import log_ndi
-from lib.phenotype.constants import DEFAULT_METADATA_COLS
+from lib.phenotype.constants import DEFAULT_METADATA_COLS, metadata_cols
 
 
 def extract_phenotype_cp_emulator(
@@ -36,6 +36,7 @@ def extract_phenotype_cp_emulator(
     cytoplasm_channels="all",
     foci_channel=None,
     channel_names=["dapi", "tubulin", "gh2ax", "phalloidin"],
+    object_name: str = "nucleus",
 ):
     """Extract phenotype features from CellProfiler-like data with multi-channel functionality.
 
@@ -63,6 +64,9 @@ def extract_phenotype_cp_emulator(
             Default is None.
         channel_names (list, optional): List of channel names used for labeling output
             columns. Default is ["dapi", "tubulin", "gh2ax", "phalloidin"].
+        object_name (str, optional): Name of the primary segmented object, used as the
+            column prefix for its features (e.g. "nucleus" -> "nucleus_area"). Default
+            is "nucleus".
 
     Returns:
         pandas.DataFrame: DataFrame containing extracted features with columns ordered as:
@@ -144,7 +148,7 @@ def extract_phenotype_cp_emulator(
         )
         .rename(columns=nucleus_columns)
         .set_index("label")
-        .add_prefix("nucleus_")
+        .add_prefix(f"{object_name}_")
     )
 
     # Extract cell features (only if cells is provided and not empty)
@@ -202,7 +206,7 @@ def extract_phenotype_cp_emulator(
     dfs.append(
         neighbor_measurements(nuclei, distances=[1])
         .set_index("label")
-        .add_prefix("nucleus_")
+        .add_prefix(f"{object_name}_")
     )
 
     # Extract cell neighbors (only if cells is provided and not empty)
@@ -228,18 +232,24 @@ def extract_phenotype_cp_emulator(
         result_df[k] = v
 
     # Apply column ordering
-    result_df = order_dataframe_columns(result_df)
+    result_df = order_dataframe_columns(
+        result_df, metadata_cols=metadata_cols(object_name), object_name=object_name
+    )
 
     return result_df
 
 
-def order_dataframe_columns(df, metadata_cols=None, label_col="label"):
+def order_dataframe_columns(
+    df, metadata_cols=None, label_col="label", object_name: str = "nucleus"
+):
     """Reorder DataFrame columns to put metadata first, then features.
 
     Args:
         df (pandas.DataFrame): DataFrame to reorder
         metadata_cols (list): List of metadata column names to put first
         label_col (str): Name of the label column
+        object_name (str, optional): Name of the primary segmented object, used to
+            identify its feature columns. Default is "nucleus".
 
     Returns:
         pandas.DataFrame: DataFrame with reordered columns
@@ -261,7 +271,7 @@ def order_dataframe_columns(df, metadata_cols=None, label_col="label"):
     remaining_cols = [col for col in df.columns if col not in ordered_cols]
 
     # Group features by type
-    nucleus_features = [col for col in remaining_cols if col.startswith("nucleus_")]
+    object_features = [col for col in remaining_cols if col.startswith(f"{object_name}_")]
     cell_features = [col for col in remaining_cols if col.startswith("cell_")]
     cytoplasm_features = [col for col in remaining_cols if col.startswith("cytoplasm_")]
 
@@ -270,13 +280,14 @@ def order_dataframe_columns(df, metadata_cols=None, label_col="label"):
         col
         for col in remaining_cols
         if not any(
-            col.startswith(prefix) for prefix in ["nucleus_", "cell_", "cytoplasm_"]
+            col.startswith(prefix)
+            for prefix in [f"{object_name}_", "cell_", "cytoplasm_"]
         )
     ]
 
     # Combine in desired order
     ordered_cols.extend(other_features)  # Any additional metadata/wildcards
-    ordered_cols.extend(nucleus_features)
+    ordered_cols.extend(object_features)
     ordered_cols.extend(cell_features)
     ordered_cols.extend(cytoplasm_features)
 

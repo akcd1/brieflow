@@ -143,3 +143,30 @@ def test_count_columns_default_to_historical_plural_names():
         columns={c: c.replace("primary", plural) for c in counts.columns if "primary" in c}
     )
     assert list(renamed.columns) == ["final_nuclei", "initial_nuclei", "cells"]
+
+
+def test_metadata_cols_default_is_backward_compatible():
+    """Absent object_name must reproduce the existing column list exactly."""
+    from lib.phenotype.constants import DEFAULT_METADATA_COLS, metadata_cols
+
+    assert metadata_cols() == DEFAULT_METADATA_COLS
+
+
+def test_metadata_cols_renames_only_the_object_columns():
+    """object_name drives the object columns and nothing else."""
+    from lib.phenotype.constants import metadata_cols
+
+    cols = metadata_cols("vacuole")
+    for expected in ("vacuole_i", "vacuole_j", "vacuole_bounds_0", "vacuole_bounds_3"):
+        assert expected in cols, f"missing {expected}"
+    assert not any(c.startswith("nucleus_") for c in cols)
+    # Cell and cytoplasm columns are a different object; they must be untouched.
+    assert "cell_i" in cols
+    assert "cytoplasm_i" in cols
+
+
+def test_feature_prefix_is_not_hardcoded(source_text):
+    """The prefix must come from object_name, never a literal."""
+    emulator = source_text("lib/phenotype/extract_phenotype_cp_emulator.py")
+    assert 'add_prefix("nucleus_")' not in emulator, "prefix still hardcoded"
+    assert 'add_prefix(f"{object_name}_")' in emulator

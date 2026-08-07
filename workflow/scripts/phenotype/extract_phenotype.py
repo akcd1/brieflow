@@ -18,6 +18,7 @@ if not segment_cells:
     cytoplasms = None
 
 cp_method = snakemake.params.cp_method
+object_name = snakemake.params.get("object_name", "nucleus")
 
 # Build wildcards dict, synthesizing 'well' from 'row'+'col' in zarr mode
 wc = dict(snakemake.wildcards)
@@ -36,6 +37,7 @@ if cp_method == "cp_measure":
         cells=cells,
         cytoplasms=cytoplasms,
         channel_names=snakemake.params.channel_names,
+        object_name=object_name,
     )
 elif cp_method == "cp_emulator":
     from lib.phenotype.extract_phenotype_cp_emulator import (
@@ -51,6 +53,7 @@ elif cp_method == "cp_emulator":
         foci_channel=snakemake.params.foci_channel_index,
         channel_names=snakemake.params.channel_names,
         wildcards=wc,
+        object_name=object_name,
     )
 else:
     raise ValueError(
