@@ -53,3 +53,20 @@ DEFAULT_METADATA_COLS = [
     "row",
     "col",
 ]
+
+
+def metadata_cols(object_name: str = "nucleus") -> list[str]:
+    """Return DEFAULT_METADATA_COLS with the object columns renamed.
+
+    The pipeline's segmented object is called a nucleus by default, but a
+    screen may name it something else (a vacuole, for instance). Only the
+    object's own columns are rewritten -- cell and cytoplasm columns describe
+    different objects and are left alone.
+    """
+    if object_name == "nucleus":
+        return list(DEFAULT_METADATA_COLS)
+
+    return [
+        f"{object_name}_{col[len('nucleus_'):]}" if col.startswith("nucleus_") else col
+        for col in DEFAULT_METADATA_COLS
+    ]

@@ -26,9 +26,10 @@ write_parquet(phenotype_cp, snakemake.output[0])
 
 
 # Create subset of features
-# Use cell_ prefix if segmenting cells, otherwise nucleus_
+# Use cell_ prefix if segmenting cells, otherwise the configured object_name
 segment_cells = snakemake.params.segment_cells
-prefix = "cell" if segment_cells else "nucleus"
+object_name = snakemake.params.object_name
+prefix = "cell" if segment_cells else object_name
 
 # Add bounds for each channel
 bounds_features = [f"{prefix}_bounds_{i}" for i in range(4)]

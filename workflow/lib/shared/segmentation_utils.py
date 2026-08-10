@@ -2,7 +2,7 @@
 
 This module provides common functions used across different segmentation methods:
 - image_log_scale: Apply log scaling to images for preprocessing
-- reconcile_nuclei_cells: Reconcile nuclei and cell labels based on overlap
+- reconcile_primary_cells: Reconcile primary object and cell labels based on overlap
 - center_pixels: Assign labels to center pixels of regions
 - relabel_array: Map values in an array based on a label dictionary
 
@@ -99,18 +99,18 @@ def relabel_array(arr, new_label_dict):
     return arr_[arr]  # Return the relabeled array
 
 
-def reconcile_nuclei_cells(nuclei, cells, how="consensus"):
-    """Reconcile nuclei and cells labels based on their overlap.
+def reconcile_primary_cells(primary, cells, how="consensus"):
+    """Reconcile primary object and cells labels based on their overlap.
 
     Args:
-        nuclei (numpy.ndarray): Nuclei mask.
+        primary (numpy.ndarray): Primary object mask.
         cells (numpy.ndarray): Cell mask.
         how (str, optional): Method to reconcile labels.
-            - 'consensus': Only keep nucleus-cell pairs where label matches are unique.
-            - 'contained_in_cells': Keep multiple nuclei for a single cell but merge them.
+            - 'consensus': Only keep primary-cell pairs where label matches are unique.
+            - 'contained_in_cells': Keep multiple primary objects for a single cell but merge them.
 
     Returns:
-        tuple: Tuple containing the reconciled nuclei and cells masks.
+        tuple: Tuple containing the reconciled primary object and cell masks.
     """
 
     def get_unique_label_map(regions, keep_multiple=False):
@@ -134,7 +134,7 @@ def reconcile_nuclei_cells(nuclei, cells, how="consensus"):
         return label_map
 
     # Erode nuclei to prevent overlapping with cells
-    nuclei_eroded = center_pixels(nuclei)
+    nuclei_eroded = center_pixels(primary)
 
     # Get unique label maps for nuclei and cells
     nucleus_map = get_unique_label_map(
@@ -167,7 +167,7 @@ def reconcile_nuclei_cells(nuclei, cells, how="consensus"):
         if cell_areas.size
         else float("nan")
     )
-    nuclear_solidities = np.array([r.solidity for r in regionprops(nuclei)])
+    nuclear_solidities = np.array([r.solidity for r in regionprops(primary)])
     mean_nuclear_solidity = (
         float(np.mean(nuclear_solidities)) if nuclear_solidities.size else float("nan")
     )
@@ -203,29 +203,29 @@ def reconcile_nuclei_cells(nuclei, cells, how="consensus"):
 
     # If no matches found, return zero arrays
     if len(keep) == 0:
-        return np.zeros_like(nuclei), np.zeros_like(cells)
+        return np.zeros_like(primary), np.zeros_like(cells)
 
     # Extract nuclei and cells to keep
     keep_nuclei, keep_cells = zip(*keep)
 
     # Reassign labels based on the reconciliation method
     if how == "contained_in_cells":
-        nuclei = relabel_array(
-            nuclei, {nuclei_label: cell_label for nuclei_label, cell_label in keep}
+        primary = relabel_array(
+            primary, {nuclei_label: cell_label for nuclei_label, cell_label in keep}
         )
         cells[~np.isin(cells, keep_cells)] = 0
         labels, cell_indices = np.unique(cells, return_inverse=True)
-        _, nuclei_indices = np.unique(nuclei, return_inverse=True)
+        _, nuclei_indices = np.unique(primary, return_inverse=True)
         cells = np.arange(0, labels.shape[0])[cell_indices.reshape(*cells.shape)]
-        nuclei = np.arange(0, labels.shape[0])[nuclei_indices.reshape(*nuclei.shape)]
+        primary = np.arange(0, labels.shape[0])[nuclei_indices.reshape(*primary.shape)]
     else:
-        nuclei = relabel_array(
-            nuclei, {label: i + 1 for i, label in enumerate(keep_nuclei)}
+        primary = relabel_array(
+            primary, {label: i + 1 for i, label in enumerate(keep_nuclei)}
         )
         cells = relabel_array(
             cells, {label: i + 1 for i, label in enumerate(keep_cells)}
         )
 
     # Convert arrays to integers
-    nuclei, cells = nuclei.astype(int), cells.astype(int)
-    return nuclei, cells
+    primary, cells = primary.astype(int), cells.astype(int)
+    return primary, cells

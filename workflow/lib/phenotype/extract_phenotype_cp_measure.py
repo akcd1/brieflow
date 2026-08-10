@@ -21,6 +21,7 @@ from cp_measure.multimask import (
     measureobjectneighbors,
     measureobjectoverlap,
 )  # contains neighbor, overlap measurements -- more specialized than the bulk ones.
+from lib.shared.rule_utils import object_plural
 
 
 # low level feature extraction - uses cp_measure.bulk.get_core_measurements() to get all basic measurements like intensity, texture, shape, etc.
@@ -126,6 +127,7 @@ def extract_phenotype_cp_measure(
     cells,
     cytoplasms=None,
     channel_names=None,
+    object_name: str = "nucleus",
 ):
     """Extract comprehensive phenotype features using cp_measure.
 
@@ -135,6 +137,8 @@ def extract_phenotype_cp_measure(
         cells (np.ndarray): Cell segmentation mask
         cytoplasms (np.ndarray, optional): Cytoplasm segmentation mask
         channel_names (list, optional): List of channel names
+        object_name (str, optional): Name of the primary segmented object, used as the
+            feature-column label in place of nucleus. Defaults to nucleus.
         wildcards (dict, optional): Snakemake wildcards
 
     Returns:
@@ -144,7 +148,7 @@ def extract_phenotype_cp_measure(
     if not isinstance(data_phenotype, np.ndarray) or data_phenotype.ndim != 3:
         raise ValueError("data_phenotype must be 3D array (channels, height, width)")
     for mask, mask_name in [
-        (nuclei, "nuclei"),
+        (nuclei, object_plural(object_name)),
         (cells, "cells"),
         (cytoplasms, "cytoplasms"),
     ]:
@@ -181,7 +185,7 @@ def extract_phenotype_cp_measure(
 
             # Process each mask type if it contains objects
             for mask, mask_name in [
-                (nuclei, "nucleus"),
+                (nuclei, object_name),
                 (cells, "cell"),
                 (cytoplasms, "cytoplasm"),
             ]:
@@ -201,7 +205,7 @@ def extract_phenotype_cp_measure(
             ch2_data = data_phenotype[ch2_idx]
 
             for mask, mask_name in [
-                (nuclei, "nucleus"),
+                (nuclei, object_name),
                 (cells, "cell"),
                 (cytoplasms, "cytoplasm"),
             ]:
@@ -219,7 +223,7 @@ def extract_phenotype_cp_measure(
         print("Computing neighbor features...")
         # Process each mask pair if both contain objects
         mask_pairs = [
-            (nuclei, nuclei, "nucleus"),
+            (nuclei, nuclei, object_name),
             (cytoplasms, cytoplasms, "cytoplasm"),
             (cells, cells, "cell"),
         ]

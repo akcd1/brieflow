@@ -1,5 +1,6 @@
 from lib.shared.file_utils import get_image_output_path, get_data_output_path
 from lib.shared.target_utils import map_outputs, outputs_to_targets
+from lib.shared.rule_utils import object_plural
 from snakemake.io import directory
 
 
@@ -10,7 +11,8 @@ PHENOTYPE_IMG_FMT = IMG_FMT
 # determine feature eval outputs based on channel names and segment_cells setting
 channel_names = config["phenotype"]["channel_names"]
 segment_cells = config["phenotype"].get("segment_cells", True)
-prefix = "cell" if segment_cells else "nucleus"
+object_name = config["phenotype"].get("object_name", "nucleus")
+prefix = "cell" if segment_cells else object_name
 eval_features = [f"{prefix}_{channel}_min" for channel in channel_names]
 
 # Location dicts (canonical form with {well}; dispatch functions handle zarr nesting)
@@ -31,7 +33,7 @@ PHENOTYPE_OUTPUTS = {
         PHENOTYPE_FP / get_image_output_path(_tile, "aligned", PHENOTYPE_IMG_FMT),
     ],
     "segment_phenotype": [
-        PHENOTYPE_FP / get_image_output_path(_tile, "nuclei", PHENOTYPE_IMG_FMT, subdirectory="labels"),
+        PHENOTYPE_FP / get_image_output_path(_tile, object_plural(object_name), PHENOTYPE_IMG_FMT, subdirectory="labels"),
         PHENOTYPE_FP / get_image_output_path(_tile, "cells", PHENOTYPE_IMG_FMT, subdirectory="labels"),
         PHENOTYPE_FP / "tsvs" / get_data_output_path(_tile, "segmentation_stats", "tsv", PHENOTYPE_IMG_FMT),
     ],

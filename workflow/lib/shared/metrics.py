@@ -159,11 +159,17 @@ def get_phenotype_stats(config):
 
         if seg_dfs:
             seg_combined = pd.concat(seg_dfs)
-            # Sum the final_cells column to get total cells (fallback to final_nuclei if needed)
+            # Sum the final_cells column to get total cells (fallback to the
+            # screen's primary-object count column if needed). Count columns
+            # use the plural form ("final_nuclei"), not the singular object_name.
+            from lib.shared.rule_utils import object_plural
+
+            object_name = config.get("phenotype", {}).get("object_name", "nucleus")
+            plural = object_plural(object_name)
             if "final_cells" in seg_combined.columns:
                 total_cells = seg_combined["final_cells"].sum()
-            elif "final_nuclei" in seg_combined.columns:
-                total_cells = seg_combined["final_nuclei"].sum()
+            elif f"final_{plural}" in seg_combined.columns:
+                total_cells = seg_combined[f"final_{plural}"].sum()
             else:
                 total_cells = 0
 

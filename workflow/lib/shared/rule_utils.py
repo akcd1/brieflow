@@ -3,7 +3,8 @@
 from pathlib import Path
 import re
 import glob
-from typing import Dict, List, Any, Union
+import warnings
+from typing import Dict, List, Any, Union, Optional
 import pandas as pd
 
 from lib.shared.file_utils import parse_filename
@@ -164,6 +165,62 @@ def get_spot_detection_params(config: Dict[str, Any]) -> Dict[str, Any]:
     return params
 
 
+# Upstream vocabulary is irregular: feature prefixes are singular ("nucleus_i")
+# while count columns are plural ("final_nuclei"). One config value cannot
+# produce both by substitution, so the plural is derived explicitly.
+_OBJECT_PLURALS = {"nucleus": "nuclei"}
+
+
+def object_plural(object_name: str) -> str:
+    """Return the plural form of an object name, honouring irregular cases."""
+    return _OBJECT_PLURALS.get(object_name, f"{object_name}s")
+
+
+def _cfg(
+    module_config: Dict[str, Any],
+    new_key: str,
+    legacy_key: str,
+    default: Optional[Any] = None,
+) -> Any:
+    """Read *new_key* from a module config, falling back to a pre-rename key.
+
+    Configs written before the ``nuclei_*`` -> ``primary_*`` rename still use
+    the legacy key names. Silently returning ``default`` in that case (what
+    ``.get()`` used to do) makes segmentation quietly diverge from what the
+    user configured, with no error. Falling back to the legacy key preserves
+    behavior; the warning ensures the substitution is never silent.
+    """
+    if new_key in module_config:
+        return module_config[new_key]
+    if legacy_key in module_config:
+        warnings.warn(
+            f"Config uses legacy key '{legacy_key}'; rename it to '{new_key}'. "
+            "Support for the legacy name will be removed.",
+            stacklevel=2,
+        )
+        return module_config[legacy_key]
+    return default
+
+
+# object_name values that collide with names hardcoded elsewhere in the
+# phenotype pipeline for the *secondary* cell/cytoplasm objects. Using one of
+# these silently corrupts output rather than raising:
+#   - lib/shared/hcs.py::_label_annotation_map builds
+#     {object_plural(object_name): <primary entry>, "cells": <cell entry>,
+#     "identified_cytoplasms": <cytoplasm entry>} as a dict literal. If
+#     object_name="cell", object_plural("cell") == "cells" and the literal
+#     "cells" entry silently overwrites the primary entry -- the primary
+#     label store's metadata ends up recording cell_diameter instead of the
+#     primary_diameter actually used.
+#   - lib/phenotype/extract_phenotype_cp_emulator.py::order_dataframe_columns
+#     groups feature columns by prefix match against f"{object_name}_",
+#     "cell_", and "cytoplasm_" independently (not mutually exclusively). If
+#     object_name is "cell" or "cytoplasm", the same columns match two
+#     groups and are duplicated in the output.
+# Reject at config-read time rather than deep inside feature extraction.
+RESERVED_OBJECT_NAMES = frozenset({"cell", "cells", "cytoplasm", "cytoplasms"})
+
+
 def get_segmentation_params(module: str, config: Dict[str, Any]) -> Dict[str, Any]:
     """Get segmentation parameters for a specific module.
 
@@ -175,9 +232,23 @@ def get_segmentation_params(module: str, config: Dict[str, Any]) -> Dict[str, An
         Dict[str, Any]: Segmentation parameters for the specified module.
 
     Raises:
-        ValueError: If an unknown segmentation method is specified.
+        ValueError: If an unknown segmentation method is specified, or if
+            object_name is one of the names reserved for the secondary
+            cell/cytoplasm objects (see RESERVED_OBJECT_NAMES).
     """
     module_config = config[module]
+
+    object_name = module_config.get("object_name", "nucleus")
+    if object_name in RESERVED_OBJECT_NAMES:
+        raise ValueError(
+            f"config['{module}']['object_name'] is '{object_name}', which is "
+            "reserved. It collides with the hardcoded secondary "
+            "cell/cytoplasm objects elsewhere in the phenotype pipeline "
+            "(label-store metadata and extracted feature columns), and "
+            "using it silently corrupts output instead of raising. "
+            f"Reserved names: {sorted(RESERVED_OBJECT_NAMES)}. Choose a "
+            "different object_name."
+        )
 
     # Get segmentation method, default to cellpose if not specified
     segmentation_method = module_config.get("segmentation_method", "cellpose")
@@ -185,6 +256,7 @@ def get_segmentation_params(module: str, config: Dict[str, Any]) -> Dict[str, An
     # Common parameters for all methods
     params = {
         "segmentation_method": segmentation_method,
+        "object_name": object_name,
         "dapi_index": module_config.get("dapi_index"),
         "cyto_index": module_config.get("cyto_index"),
         "reconcile": module_config.get("reconcile", False),
@@ -195,27 +267,37 @@ def get_segmentation_params(module: str, config: Dict[str, Any]) -> Dict[str, An
 
     # Method-specific parameters
     if segmentation_method == "cellpose":
+        # Shared flow/cellprob defaults, used both directly and as the
+        # fallback layer beneath the primary_*/cell_* specific keys.
+        shared_flow_threshold = module_config.get("flow_threshold", 0.4)
+        shared_cellprob_threshold = module_config.get("cellprob_threshold", 0)
         params.update(
             {
                 "cellpose_model": module_config.get("cellpose_model", "cyto3"),
                 "helper_index": module_config.get("helper_index"),
-                "nuclei_diameter": module_config.get("nuclei_diameter"),
-                "cell_diameter": module_config.get("cell_diameter"),
-                "flow_threshold": module_config.get("flow_threshold", 0.4),
-                "cellprob_threshold": module_config.get("cellprob_threshold", 0),
-                "nuclei_flow_threshold": module_config.get(
-                    "nuclei_flow_threshold", module_config.get("flow_threshold", 0.4)
+                "primary_diameter": _cfg(
+                    module_config, "primary_diameter", "nuclei_diameter", None
                 ),
-                "nuclei_cellprob_threshold": module_config.get(
+                "cell_diameter": module_config.get("cell_diameter"),
+                "flow_threshold": shared_flow_threshold,
+                "cellprob_threshold": shared_cellprob_threshold,
+                "primary_flow_threshold": _cfg(
+                    module_config,
+                    "primary_flow_threshold",
+                    "nuclei_flow_threshold",
+                    shared_flow_threshold,
+                ),
+                "primary_cellprob_threshold": _cfg(
+                    module_config,
+                    "primary_cellprob_threshold",
                     "nuclei_cellprob_threshold",
-                    module_config.get("cellprob_threshold", 0),
+                    shared_cellprob_threshold,
                 ),
                 "cell_flow_threshold": module_config.get(
-                    "cell_flow_threshold", module_config.get("flow_threshold", 0.4)
+                    "cell_flow_threshold", shared_flow_threshold
                 ),
                 "cell_cellprob_threshold": module_config.get(
-                    "cell_cellprob_threshold",
-                    module_config.get("cellprob_threshold", 0),
+                    "cell_cellprob_threshold", shared_cellprob_threshold
                 ),
             }
         )
@@ -225,10 +307,15 @@ def get_segmentation_params(module: str, config: Dict[str, Any]) -> Dict[str, An
                 "stardist_model": module_config.get(
                     "stardist_model", "2D_versatile_fluo"
                 ),
-                "nuclei_prob_threshold": module_config.get(
-                    "nuclei_prob_threshold", 0.479071
+                "primary_prob_threshold": _cfg(
+                    module_config,
+                    "primary_prob_threshold",
+                    "nuclei_prob_threshold",
+                    0.479071,
                 ),
-                "nuclei_nms_threshold": module_config.get("nuclei_nms_threshold", 0.3),
+                "primary_nms_threshold": _cfg(
+                    module_config, "primary_nms_threshold", "nuclei_nms_threshold", 0.3
+                ),
                 "cell_prob_threshold": module_config.get(
                     "cell_prob_threshold", 0.479071
                 ),
@@ -239,8 +326,12 @@ def get_segmentation_params(module: str, config: Dict[str, Any]) -> Dict[str, An
         params.update(
             {
                 "threshold_dapi": module_config.get("threshold_dapi", 4260),
-                "nuclei_area_min": module_config.get("nuclei_area_min", 45),
-                "nuclei_area_max": module_config.get("nuclei_area_max", 450),
+                "primary_area_min": _cfg(
+                    module_config, "primary_area_min", "nuclei_area_min", 45
+                ),
+                "primary_area_max": _cfg(
+                    module_config, "primary_area_max", "nuclei_area_max", 450
+                ),
                 "threshold_cell": module_config.get("threshold_cell", 1300),
             }
         )

@@ -25,7 +25,7 @@ rule align_phenotype:
         "../scripts/phenotype/align_phenotype.py"
 
 
-# Segments cells and nuclei using pre-defined methods
+# Segments cells and primary objects using pre-defined methods
 rule segment_phenotype:
     input:
         PHENOTYPE_OUTPUTS["align_phenotype"],
@@ -37,10 +37,10 @@ rule segment_phenotype:
         "../scripts/shared/segment.py"
 
 
-# Extract cytoplasmic masks from segmented nuclei, cells
+# Extract cytoplasmic masks from segmented primary objects, cells
 rule identify_cytoplasm:
     input:
-        # nuclei segmentation map
+        # primary object segmentation map
         PHENOTYPE_OUTPUTS["segment_phenotype"][0],
         # cells segmentation map
         PHENOTYPE_OUTPUTS["segment_phenotype"][1],
@@ -52,10 +52,10 @@ rule identify_cytoplasm:
         "../scripts/phenotype/identify_cytoplasm_cellpose.py"
 
 
-# Extract minimal phenotype information from segmented nuclei images
+# Extract minimal phenotype information from segmented primary object images
 rule extract_phenotype_info:
     input:
-        # nuclei segmentation map
+        # primary object segmentation map
         PHENOTYPE_OUTPUTS["segment_phenotype"][0],
     output:
         PHENOTYPE_OUTPUTS_MAPPED["extract_phenotype_info"],
@@ -83,7 +83,7 @@ rule extract_phenotype:
     input:
         # aligned phenotype image
         PHENOTYPE_OUTPUTS["align_phenotype"][0],
-        # nuclei segmentation map
+        # primary object segmentation map
         PHENOTYPE_OUTPUTS["segment_phenotype"][0],
         # cells segmentation map
         PHENOTYPE_OUTPUTS["segment_phenotype"][1],
@@ -96,6 +96,7 @@ rule extract_phenotype:
         channel_names=config.get("phenotype", {}).get("channel_names"),
         cp_method=config.get("phenotype", {}).get("cp_method"),
         segment_cells=config.get("phenotype", {}).get("segment_cells", True),
+        object_name=config.get("phenotype", {}).get("object_name", "nucleus"),
     script:
         "../scripts/phenotype/extract_phenotype.py"
 
@@ -112,6 +113,7 @@ rule merge_phenotype:
     params:
         channel_names=config.get("phenotype", {}).get("channel_names"),
         segment_cells=config.get("phenotype", {}).get("segment_cells", True),
+        object_name=config.get("phenotype", {}).get("object_name", "nucleus"),
     output:
         PHENOTYPE_OUTPUTS_MAPPED["merge_phenotype"],
     script:
@@ -142,6 +144,8 @@ rule eval_segmentation_phenotype:
             expansion_values=_phen_well_expand,
             metadata_combos=phenotype_wildcard_combos,
         ),
+    params:
+        object_name=config.get("phenotype", {}).get("object_name", "nucleus"),
     output:
         PHENOTYPE_OUTPUTS_MAPPED["eval_segmentation_phenotype"],
     script:

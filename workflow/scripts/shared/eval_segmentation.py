@@ -16,8 +16,9 @@ from lib.shared.parquet_io import read_parquets
 
 
 # Get the segmentation overview
+object_name = snakemake.params.get("object_name", "nucleus")
 segmentation_overview_df = segmentation_overview(
-    snakemake.input.segmentation_stats_paths
+    snakemake.input.segmentation_stats_paths, object_name=object_name
 )
 # Save the segmentation overview
 segmentation_overview_df.to_csv(snakemake.output[0], sep="\t", index=False)

@@ -3,18 +3,18 @@
 import numpy as np
 
 
-def identify_cytoplasm_cellpose(nuclei, cells):
-    """Identifies and isolates the cytoplasm region in an image based on the provided nuclei and cells masks.
+def identify_cytoplasm_cellpose(primary, cells):
+    """Identifies and isolates the cytoplasm region in an image based on the provided primary object and cells masks.
 
     Args:
-        nuclei (ndarray): A 2D array representing the nuclei regions.
+        primary (ndarray): A 2D array representing the primary object regions.
         cells (ndarray): A 2D array representing the cells regions.
 
     Returns:
         ndarray: A 2D array representing the cytoplasm regions.
     """
-    # Check if the number of unique labels in nuclei and cells are the same
-    if len(np.unique(nuclei)) != len(np.unique(cells)):
+    # Check if the number of unique labels in primary and cells are the same
+    if len(np.unique(primary)) != len(np.unique(cells)):
         return None  # Break out of the function if the masks are not compatible
 
     # Create an empty cytoplasmic mask with the same shape as cells
@@ -26,18 +26,18 @@ def identify_cytoplasm_cellpose(nuclei, cells):
         if cell_label == 0:
             continue
 
-        # Find the corresponding nucleus label for this cell
-        nucleus_label = cell_label
+        # Find the corresponding primary object label for this cell
+        primary_label = cell_label
 
-        # Get the coordinates of the nucleus and cell regions
-        nucleus_coords = np.argwhere(nuclei == nucleus_label)
+        # Get the coordinates of the primary object and cell regions
+        primary_coords = np.argwhere(primary == primary_label)
         cell_coords = np.argwhere(cells == cell_label)
 
         # Update the cytoplasmic mask with the cell region
         cytoplasms[cell_coords[:, 0], cell_coords[:, 1]] = cell_label
 
-        # Remove the nucleus region from the cytoplasmic mask
-        cytoplasms[nucleus_coords[:, 0], nucleus_coords[:, 1]] = 0
+        # Remove the primary object region from the cytoplasmic mask
+        cytoplasms[primary_coords[:, 0], primary_coords[:, 1]] = 0
 
     # Calculate the number of identified cytoplasms (excluding background label)
     num_cytoplasm_segmented = len(np.unique(cytoplasms)) - 1
