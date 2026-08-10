@@ -202,6 +202,25 @@ def _cfg(
     return default
 
 
+# object_name values that collide with names hardcoded elsewhere in the
+# phenotype pipeline for the *secondary* cell/cytoplasm objects. Using one of
+# these silently corrupts output rather than raising:
+#   - lib/shared/hcs.py::_label_annotation_map builds
+#     {object_plural(object_name): <primary entry>, "cells": <cell entry>,
+#     "identified_cytoplasms": <cytoplasm entry>} as a dict literal. If
+#     object_name="cell", object_plural("cell") == "cells" and the literal
+#     "cells" entry silently overwrites the primary entry -- the primary
+#     label store's metadata ends up recording cell_diameter instead of the
+#     primary_diameter actually used.
+#   - lib/phenotype/extract_phenotype_cp_emulator.py::order_dataframe_columns
+#     groups feature columns by prefix match against f"{object_name}_",
+#     "cell_", and "cytoplasm_" independently (not mutually exclusively). If
+#     object_name is "cell" or "cytoplasm", the same columns match two
+#     groups and are duplicated in the output.
+# Reject at config-read time rather than deep inside feature extraction.
+RESERVED_OBJECT_NAMES = frozenset({"cell", "cells", "cytoplasm", "cytoplasms"})
+
+
 def get_segmentation_params(module: str, config: Dict[str, Any]) -> Dict[str, Any]:
     """Get segmentation parameters for a specific module.
 
@@ -213,9 +232,23 @@ def get_segmentation_params(module: str, config: Dict[str, Any]) -> Dict[str, An
         Dict[str, Any]: Segmentation parameters for the specified module.
 
     Raises:
-        ValueError: If an unknown segmentation method is specified.
+        ValueError: If an unknown segmentation method is specified, or if
+            object_name is one of the names reserved for the secondary
+            cell/cytoplasm objects (see RESERVED_OBJECT_NAMES).
     """
     module_config = config[module]
+
+    object_name = module_config.get("object_name", "nucleus")
+    if object_name in RESERVED_OBJECT_NAMES:
+        raise ValueError(
+            f"config['{module}']['object_name'] is '{object_name}', which is "
+            "reserved. It collides with the hardcoded secondary "
+            "cell/cytoplasm objects elsewhere in the phenotype pipeline "
+            "(label-store metadata and extracted feature columns), and "
+            "using it silently corrupts output instead of raising. "
+            f"Reserved names: {sorted(RESERVED_OBJECT_NAMES)}. Choose a "
+            "different object_name."
+        )
 
     # Get segmentation method, default to cellpose if not specified
     segmentation_method = module_config.get("segmentation_method", "cellpose")
@@ -223,7 +256,7 @@ def get_segmentation_params(module: str, config: Dict[str, Any]) -> Dict[str, An
     # Common parameters for all methods
     params = {
         "segmentation_method": segmentation_method,
-        "object_name": module_config.get("object_name", "nucleus"),
+        "object_name": object_name,
         "dapi_index": module_config.get("dapi_index"),
         "cyto_index": module_config.get("cyto_index"),
         "reconcile": module_config.get("reconcile", False),

@@ -430,6 +430,48 @@ def test_placeholder_allzero_label_gets_no_segmentation_metadata(tmp_path):
     assert "segmentation_metadata" not in meta.get("attributes", {})
 
 
+# ---------------------------------------------------------------------------
+# Regression test: independent review IMPORTANT 2
+#
+# object_name="cell" (or "cells"/"cytoplasm"/"cytoplasms") collides with
+# names hardcoded elsewhere in the phenotype pipeline: with object_name=
+# "cell", hcs._label_annotation_map collapses from 3 keys to 2 (the primary
+# entry is silently overwritten by the literal "cells" entry), and
+# order_dataframe_columns duplicates columns that match both the
+# f"{object_name}_" and "cell_" prefixes. Nothing rejected it. get_segmentation_params
+# must now fail loudly at config-read time instead.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("reserved_name", ["cell", "cells", "cytoplasm", "cytoplasms"])
+def test_reserved_object_name_rejected(reserved_name):
+    """Reserved object_name values must raise ValueError, not corrupt output."""
+    from lib.shared.rule_utils import get_segmentation_params
+
+    config = {
+        "phenotype": {
+            "segmentation_method": "cellpose",
+            "object_name": reserved_name,
+        }
+    }
+    with pytest.raises(ValueError, match=reserved_name):
+        get_segmentation_params("phenotype", config)
+
+
+def test_non_reserved_object_name_still_accepted():
+    """The reserved-name check must not reject legitimate object names."""
+    from lib.shared.rule_utils import get_segmentation_params
+
+    config = {
+        "phenotype": {
+            "segmentation_method": "cellpose",
+            "object_name": "vacuole",
+        }
+    }
+    params = get_segmentation_params("phenotype", config)
+    assert params["object_name"] == "vacuole"
+
+
 def test_real_segmentation_label_still_gets_metadata(tmp_path):
     """Sanity check: a label store with real (non-zero) objects still gets
     segmentation_metadata written, so the all-zero skip isn't overbroad.
